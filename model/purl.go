@@ -1,14 +1,16 @@
-// Package model - PURL defines the struct for Package URL documents.
 package model
 
-// PURL represents a package URL document in the purl collection
+// PURL represents a package URL (base form without version)
+// Used as a hub to connect CVEs and SBOMs
 type PURL struct {
 	Key     string `json:"_key,omitempty"`
-	Purl    string `json:"purl"` // Cleaned/canonical PURL without qualifiers and subpath
-	ObjType string `json:"objtype,omitempty"`
+	Purl    string `json:"purl"` // Base PURL without version (e.g., pkg:npm/lodash)
+	ObjType string `json:"objtype"`
 }
 
-// NewPURL is the constructor that sets the appropriate default values
+// NewPURL creates a new PURL instance
 func NewPURL() *PURL {
-	return &PURL{ObjType: "PURL"}
+	return &PURL{
+		ObjType: "PURL",
+	}
 }

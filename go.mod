@@ -3,9 +3,11 @@ module github.com/ortelius/cve2release-tracker
 go 1.25.3
 
 require (
+	github.com/Masterminds/semver/v3 v3.2.1
 	github.com/arangodb/go-driver/v2 v2.1.5
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/gofiber/fiber/v2 v2.52.9
+	github.com/google/osv-scanner v1.4.3
 	github.com/package-url/packageurl-go v0.1.3
 	github.com/spf13/cobra v1.10.1
 	go.uber.org/zap v1.27.0
@@ -34,6 +36,7 @@ require (
 	github.com/valyala/fasthttp v1.67.0 // indirect
 	github.com/xyproto/randomstring v1.2.0 // indirect
 	go.uber.org/multierr v1.11.0 // indirect
+	golang.org/x/exp v0.0.0-20241108190413-2d47ceb2692f // indirect
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect

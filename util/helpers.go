@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/Masterminds/semver/v3"
+	"github.com/google/osv-scanner/pkg/models"
 	"github.com/package-url/packageurl-go"
 	"gopkg.in/yaml.v2"
 )
@@ -169,4 +171,146 @@ func CleanPURL(purlStr string) (string, error) {
 	}
 
 	return cleaned.ToString(), nil
+}
+
+// GetBasePURL removes the version component from a PURL to create a base package identifier
+// This is used for matching CVE PURLs (which lack versions) with SBOM component PURLs (which include versions)
+// Example: pkg:npm/lodash@4.17.20 -> pkg:npm/lodash
+func GetBasePURL(purlStr string) (string, error) {
+	parsed, err := packageurl.FromString(purlStr)
+	if err != nil {
+		return "", err
+	}
+
+	// Create new PURL without version, qualifiers, and subpath
+	base := packageurl.PackageURL{
+		Type:      parsed.Type,
+		Namespace: parsed.Namespace,
+		Name:      parsed.Name,
+		// Version, Qualifiers and Subpath are intentionally omitted
+	}
+
+	return base.ToString(), nil
+}
+
+// ParsePURL parses a PURL string and returns the parsed PackageURL
+func ParsePURL(purlStr string) (*packageurl.PackageURL, error) {
+	parsed, err := packageurl.FromString(purlStr)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
+// EcosystemToPurlType converts OSV ecosystem to PURL type
+func EcosystemToPurlType(ecosystem string) string {
+	mapping := map[string]string{
+		"npm":       "npm",
+		"PyPI":      "pypi",
+		"Maven":     "maven",
+		"Go":        "golang",
+		"NuGet":     "nuget",
+		"RubyGems":  "gem",
+		"crates.io": "cargo",
+		"Packagist": "composer",
+		"Pub":       "pub",
+		"CocoaPods": "cocoapods",
+		"Hex":       "hex",
+		"Alpine":    "alpine",
+		"Debian":    "deb",
+		"Ubuntu":    "deb",
+	}
+	return mapping[ecosystem]
+}
+
+// IsVersionAffected checks if a version is affected by OSV ranges
+func IsVersionAffected(version string, affected models.Affected) bool {
+	// Check specific versions list
+	if len(affected.Versions) > 0 {
+		for _, v := range affected.Versions {
+			if version == v {
+				return true
+			}
+		}
+	}
+
+	// Check version ranges
+	if len(affected.Ranges) > 0 {
+		for _, vrange := range affected.Ranges {
+			// Only handle SEMVER and ECOSYSTEM types
+			if vrange.Type != models.RangeEcosystem && vrange.Type != models.RangeSemVer {
+				continue
+			}
+
+			if isVersionInRange(version, vrange) {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// isVersionInRange checks if a version falls within an OSV range
+func isVersionInRange(version string, vrange models.Range) bool {
+	v, err := semver.NewVersion(version)
+	if err != nil {
+		// If not valid semver, fall back to string comparison
+		return isVersionInRangeString(version, vrange)
+	}
+
+	var introduced, fixed, lastAffected *semver.Version
+
+	for _, event := range vrange.Events {
+		if event.Introduced != "" && event.Introduced != "0" {
+			introduced, _ = semver.NewVersion(event.Introduced)
+		}
+		if event.Fixed != "" {
+			fixed, _ = semver.NewVersion(event.Fixed)
+		}
+		if event.LastAffected != "" {
+			lastAffected, _ = semver.NewVersion(event.LastAffected)
+		}
+	}
+
+	// Check if version is >= introduced
+	if introduced != nil && v.LessThan(introduced) {
+		return false
+	}
+
+	// Check if version is < fixed
+	if fixed != nil && !v.LessThan(fixed) {
+		return false
+	}
+
+	// Check if version is <= last_affected
+	if lastAffected != nil && v.GreaterThan(lastAffected) {
+		return false
+	}
+
+	// If we get here and there's an introduced/fixed/last_affected, it's affected
+	return introduced != nil || fixed != nil || lastAffected != nil
+}
+
+// isVersionInRangeString performs string-based comparison as fallback
+func isVersionInRangeString(version string, vrange models.Range) bool {
+	for _, event := range vrange.Events {
+		// Simple string comparison for non-semver versions
+		if event.Introduced != "" && event.Introduced != "0" {
+			if version < event.Introduced {
+				return false
+			}
+		}
+		if event.Fixed != "" {
+			if version >= event.Fixed {
+				return false
+			}
+		}
+		if event.LastAffected != "" {
+			if version > event.LastAffected {
+				return false
+			}
+		}
+	}
+	return true
 }

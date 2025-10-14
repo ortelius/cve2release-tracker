@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
+	"github.com/google/osv-scanner/pkg/models"
 	"github.com/ortelius/cve2release-tracker/database"
 	"github.com/ortelius/cve2release-tracker/model"
 	"github.com/ortelius/cve2release-tracker/util"
@@ -61,6 +62,7 @@ func populateContentSha(release *model.ProjectRelease) {
 }
 
 // processSBOMComponents extracts PURLs from SBOM and creates hub-spoke relationships
+// Now stores version information in edges for CVE matching
 func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) error {
 	// Parse SBOM content to extract components
 	var sbomData struct {
@@ -86,20 +88,34 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 			continue
 		}
 
-		// Find or create PURL document in the purl collection using cleaned PURL
-		purlKey, purlID, err := findOrCreatePURL(ctx, cleanedPurl)
+		// Parse to extract version
+		parsed, err := util.ParsePURL(cleanedPurl)
+		if err != nil {
+			continue
+		}
+
+		// Get base PURL (without version) for hub matching
+		basePurl, err := util.GetBasePURL(cleanedPurl)
+		if err != nil {
+			continue
+		}
+
+		// Find or create PURL document using base PURL
+		purlKey, purlID, err := findOrCreatePURL(ctx, basePurl)
 		if err != nil {
 			return err
 		}
 
-		// Create edge from SBOM to PURL (sbom2purl)
+		// Create edge from SBOM to PURL with version information
 		edge := map[string]interface{}{
-			"_from": sbomID,
-			"_to":   purlID,
+			"_from":     sbomID,
+			"_to":       purlID,
+			"version":   parsed.Version, // Store the specific version
+			"full_purl": cleanedPurl,    // Store complete PURL with version
 		}
 
-		// Check if edge already exists
-		edgeExists, err := checkEdgeExists(ctx, "sbom2purl", sbomID, purlID)
+		// Check if edge already exists with this version
+		edgeExists, err := checkEdgeExistsWithVersion(ctx, "sbom2purl", sbomID, purlID, parsed.Version)
 		if err != nil {
 			return err
 		}
@@ -118,8 +134,9 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 }
 
 // findOrCreatePURL finds an existing PURL or creates a new one, returns key and ID
-func findOrCreatePURL(ctx context.Context, purlStr string) (string, string, error) {
-	// Query to find existing PURL
+// Uses base PURL (without version) for hub-and-spoke matching
+func findOrCreatePURL(ctx context.Context, basePurl string) (string, string, error) {
+	// Query to find existing PURL by base form
 	query := `
 		FOR p IN purl
 			FILTER p.purl == @purl
@@ -127,7 +144,7 @@ func findOrCreatePURL(ctx context.Context, purlStr string) (string, string, erro
 			RETURN p
 	`
 	bindVars := map[string]interface{}{
-		"purl": purlStr,
+		"purl": basePurl,
 	}
 
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
@@ -150,7 +167,7 @@ func findOrCreatePURL(ctx context.Context, purlStr string) (string, string, erro
 
 	// Create new PURL if it doesn't exist
 	newPURL := model.NewPURL()
-	newPURL.Purl = purlStr
+	newPURL.Purl = basePurl // Store base PURL (without version)
 
 	meta, err := db.Collections["purl"].CreateDocument(ctx, newPURL)
 	if err != nil {
@@ -158,6 +175,32 @@ func findOrCreatePURL(ctx context.Context, purlStr string) (string, string, erro
 	}
 
 	return meta.Key, "purl/" + meta.Key, nil
+}
+
+// checkEdgeExistsWithVersion checks if an edge exists with specific version
+func checkEdgeExistsWithVersion(ctx context.Context, edgeCollection, fromID, toID, version string) (bool, error) {
+	query := `
+		FOR e IN @@edgeCollection
+			FILTER e._from == @from && e._to == @to && e.version == @version
+			LIMIT 1
+			RETURN e
+	`
+	bindVars := map[string]interface{}{
+		"@edgeCollection": edgeCollection,
+		"from":            fromID,
+		"to":              toID,
+		"version":         version,
+	}
+
+	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
+	if err != nil {
+		return false, err
+	}
+	defer cursor.Close()
+
+	return cursor.HasMore(), nil
 }
 
 // checkEdgeExists checks if an edge already exists between two documents
@@ -462,6 +505,366 @@ func GetReleaseWithSBOM(c *fiber.Ctx) error {
 }
 
 // ============================================================================
+// CVE Analysis Handlers
+// ============================================================================
+
+// GetAffectedReleasesByCVE returns all releases affected by a specific CVE
+// Uses Go-based version matching for accuracy
+func GetAffectedReleasesByCVE(c *fiber.Ctx) error {
+	cveID := c.Params("cveId")
+
+	if cveID == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "CVE ID is required",
+		})
+	}
+
+	ctx := context.Background()
+
+	// Step 1: Get the CVE with OSV data
+	cveQuery := `
+		FOR cve IN cve
+			FILTER cve.osv.id == @cveId
+			LIMIT 1
+			RETURN cve
+	`
+
+	cveCursor, err := db.Database.Query(ctx, cveQuery, &arangodb.QueryOptions{
+		BindVars: map[string]interface{}{
+			"cveId": cveID,
+		},
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to query CVE: " + err.Error(),
+		})
+	}
+	defer cveCursor.Close()
+
+	if !cveCursor.HasMore() {
+		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+			"success": false,
+			"message": "CVE not found",
+		})
+	}
+
+	var cveDoc struct {
+		Key string               `json:"_key"`
+		OSV models.Vulnerability `json:"osv"`
+	}
+	_, err = cveCursor.ReadDocument(ctx, &cveDoc)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to read CVE: " + err.Error(),
+		})
+	}
+
+	// Step 2: Get all potential matches (simplified AQL - no version logic)
+	candidatesQuery := `
+		LET cveId = @cveId
+		
+		FOR cve IN cve
+			FILTER cve.osv.id == cveId
+			
+			// Get all affected packages from CVE
+			FOR affected IN cve.osv.affected
+				
+				// Build base PURL
+				LET basePurl = (
+					affected.package.purl != null 
+					? REGEX_REPLACE(affected.package.purl, "@[^@]*$", "")
+					: CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+				)
+				
+				// Find matching PURL hub
+				FOR purl IN purl
+					FILTER purl.purl == basePurl
+					
+					// Get all SBOM edges with versions
+					FOR sbomEdge IN sbom2purl
+						FILTER sbomEdge._to == purl._id
+						
+						LET sbom = DOCUMENT(sbomEdge._from)
+						
+						// Get all releases using this SBOM
+						FOR release IN 1..1 INBOUND sbom release2sbom
+							
+							RETURN {
+								affected_index: POSITION(cve.osv.affected, affected),
+								package: purl.purl,
+								version: sbomEdge.version,
+								full_purl: sbomEdge.full_purl,
+								release_name: release.name,
+								release_version: release.version,
+								content_sha: release.contentsha,
+								project_type: release.projecttype
+							}
+	`
+
+	candidatesCursor, err := db.Database.Query(ctx, candidatesQuery, &arangodb.QueryOptions{
+		BindVars: map[string]interface{}{
+			"cveId": cveID,
+		},
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to query candidates: " + err.Error(),
+		})
+	}
+	defer candidatesCursor.Close()
+
+	// Step 3: Filter candidates in Go using proper semver
+	type Candidate struct {
+		AffectedIndex  int    `json:"affected_index"`
+		Package        string `json:"package"`
+		Version        string `json:"version"`
+		FullPurl       string `json:"full_purl"`
+		ReleaseName    string `json:"release_name"`
+		ReleaseVersion string `json:"release_version"`
+		ContentSha     string `json:"content_sha"`
+		ProjectType    string `json:"project_type"`
+	}
+
+	var affectedReleases []map[string]interface{}
+	seen := make(map[string]bool) // Deduplication
+
+	for candidatesCursor.HasMore() {
+		var candidate Candidate
+		_, err := candidatesCursor.ReadDocument(ctx, &candidate)
+		if err != nil {
+			continue
+		}
+
+		// Get the affected package info from CVE
+		if candidate.AffectedIndex >= len(cveDoc.OSV.Affected) {
+			continue
+		}
+		affected := cveDoc.OSV.Affected[candidate.AffectedIndex]
+
+		// Check if this version is actually affected using Go logic
+		if !util.IsVersionAffected(candidate.Version, affected) {
+			continue
+		}
+
+		// Deduplicate by release
+		key := candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		// Extract severity
+		var severity string
+		for _, sev := range cveDoc.OSV.Severity {
+			if sev.Type == "CVSS_V3" {
+				severity = sev.Score
+				break
+			}
+		}
+
+		affectedReleases = append(affectedReleases, map[string]interface{}{
+			"cve_id":           cveDoc.OSV.ID,
+			"summary":          cveDoc.OSV.Summary,
+			"details":          cveDoc.OSV.Details,
+			"severity":         severity,
+			"published":        cveDoc.OSV.Published,
+			"modified":         cveDoc.OSV.Modified,
+			"aliases":          cveDoc.OSV.Aliases,
+			"package":          candidate.Package,
+			"affected_version": candidate.Version,
+			"full_purl":        candidate.FullPurl,
+			"release_name":     candidate.ReleaseName,
+			"release_version":  candidate.ReleaseVersion,
+			"content_sha":      candidate.ContentSha,
+			"project_type":     candidate.ProjectType,
+		})
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"success":           true,
+		"cve_id":            cveID,
+		"count":             len(affectedReleases),
+		"affected_releases": affectedReleases,
+	})
+}
+
+// GetReleaseVulnerabilities returns all CVEs affecting a specific release
+func GetReleaseVulnerabilities(c *fiber.Ctx) error {
+	name := c.Params("name")
+	version := c.Params("version")
+
+	if name == "" || version == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"success": false,
+			"message": "Release name and version are required",
+		})
+	}
+
+	ctx := context.Background()
+
+	// Step 1: Get all packages in this release with versions
+	packagesQuery := `
+		FOR release IN release
+			FILTER release.name == @name AND release.version == @version
+			
+			FOR sbom IN 1..1 OUTBOUND release release2sbom
+				FOR sbomEdge IN sbom2purl
+					FILTER sbomEdge._from == sbom._id
+					
+					LET purl = DOCUMENT(sbomEdge._to)
+					
+					RETURN {
+						package: purl.purl,
+						version: sbomEdge.version,
+						full_purl: sbomEdge.full_purl
+					}
+	`
+
+	packagesCursor, err := db.Database.Query(ctx, packagesQuery, &arangodb.QueryOptions{
+		BindVars: map[string]interface{}{
+			"name":    name,
+			"version": version,
+		},
+	})
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to query packages: " + err.Error(),
+		})
+	}
+	defer packagesCursor.Close()
+
+	type PackageVersion struct {
+		Package  string `json:"package"`
+		Version  string `json:"version"`
+		FullPurl string `json:"full_purl"`
+	}
+
+	var packages []PackageVersion
+	for packagesCursor.HasMore() {
+		var pkg PackageVersion
+		_, err := packagesCursor.ReadDocument(ctx, &pkg)
+		if err != nil {
+			continue
+		}
+		packages = append(packages, pkg)
+	}
+
+	// Step 2: Get all CVEs (we'll filter in Go)
+	cvesQuery := `
+		FOR cve IN cve
+			RETURN {
+				id: cve.osv.id,
+				summary: cve.osv.summary,
+				details: cve.osv.details,
+				severity: cve.osv.severity,
+				published: cve.osv.published,
+				modified: cve.osv.modified,
+				aliases: cve.osv.aliases,
+				affected: cve.osv.affected
+			}
+	`
+
+	cvesCursor, err := db.Database.Query(ctx, cvesQuery, nil)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+			"success": false,
+			"message": "Failed to query CVEs: " + err.Error(),
+		})
+	}
+	defer cvesCursor.Close()
+
+	type CVEData struct {
+		ID        string            `json:"id"`
+		Summary   string            `json:"summary"`
+		Details   string            `json:"details"`
+		Severity  []models.Severity `json:"severity"`
+		Published string            `json:"published"`
+		Modified  string            `json:"modified"`
+		Aliases   []string          `json:"aliases"`
+		Affected  []models.Affected `json:"affected"`
+	}
+
+	var vulnerabilities []map[string]interface{}
+	seen := make(map[string]bool)
+
+	for cvesCursor.HasMore() {
+		var cve CVEData
+		_, err := cvesCursor.ReadDocument(ctx, &cve)
+		if err != nil {
+			continue
+		}
+
+		// Check each package in the release against this CVE
+		for _, pkg := range packages {
+			for _, affected := range cve.Affected {
+				// Build base PURL from affected package
+				var basePurl string
+				if affected.Package.Purl != "" {
+					basePurl, _ = util.GetBasePURL(affected.Package.Purl)
+				} else {
+					ecosystem := util.EcosystemToPurlType(string(affected.Package.Ecosystem))
+					if ecosystem != "" {
+						basePurl = "pkg:" + ecosystem + "/" + affected.Package.Name
+					}
+				}
+
+				// Check if this package matches
+				if pkg.Package != basePurl {
+					continue
+				}
+
+				// Check if the version is affected
+				if !util.IsVersionAffected(pkg.Version, affected) {
+					continue
+				}
+
+				// Deduplicate
+				key := cve.ID + ":" + pkg.Package + ":" + pkg.Version
+				if seen[key] {
+					continue
+				}
+				seen[key] = true
+
+				// Extract severity
+				var severity string
+				for _, sev := range cve.Severity {
+					if sev.Type == "CVSS_V3" {
+						severity = sev.Score
+						break
+					}
+				}
+
+				vulnerabilities = append(vulnerabilities, map[string]interface{}{
+					"cve_id":           cve.ID,
+					"summary":          cve.Summary,
+					"details":          cve.Details,
+					"severity":         severity,
+					"published":        cve.Published,
+					"modified":         cve.Modified,
+					"aliases":          cve.Aliases,
+					"package":          pkg.Package,
+					"affected_version": pkg.Version,
+					"full_purl":        pkg.FullPurl,
+				})
+			}
+		}
+	}
+
+	return c.Status(fiber.StatusOK).JSON(fiber.Map{
+		"success":         true,
+		"release_name":    name,
+		"release_version": version,
+		"count":           len(vulnerabilities),
+		"vulnerabilities": vulnerabilities,
+	})
+}
+
+// ============================================================================
 // LIST Handlers
 // ============================================================================
 
@@ -542,6 +945,10 @@ func main() {
 
 	// GET endpoints
 	api.Get("/releases/:name/:version", GetReleaseWithSBOM)
+	api.Get("/releases/:name/:version/vulnerabilities", GetReleaseVulnerabilities)
+
+	// CVE analysis endpoints
+	api.Get("/cve/:cveId/affected-releases", GetAffectedReleasesByCVE)
 
 	// LIST endpoints
 	api.Get("/releases", ListReleases)

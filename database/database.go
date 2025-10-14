@@ -217,19 +217,29 @@ func InitializeDatabase() DBConnection {
 	//
 
 	idxList := []indexConfig{
+		// CVE collection indexes
 		{Collection: "cve", IdxName: "package_name", IdxField: "affected[*].package.name"},
 		{Collection: "cve", IdxName: "package_purl", IdxField: "affected[*].package.purl"},
+		{Collection: "cve", IdxName: "cve_osv_id", IdxField: "osv.id"},
+		{Collection: "cve", IdxName: "cve_id", IdxField: "id"},
+
+		// SBOM collection indexes
 		{Collection: "sbom", IdxName: "sbom_contentsha", IdxField: "contentsha"},
+
+		// PURL collection indexes - unique index on base PURL
 		{Collection: "purl", IdxName: "purl_idx", IdxField: "purl"},
-		// Indexes for composite key lookup (release deduplication)
+
+		// Release collection indexes for composite key lookup (release deduplication)
 		{Collection: "release", IdxName: "release_name", IdxField: "name"},
 		{Collection: "release", IdxName: "release_version", IdxField: "version"},
 		{Collection: "release", IdxName: "release_contentsha", IdxField: "contentsha"},
+
 		// Edge collection indexes for optimized traversals
 		{Collection: "release2sbom", IdxName: "release2sbom_from", IdxField: "_from"},
 		{Collection: "release2sbom", IdxName: "release2sbom_to", IdxField: "_to"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_from", IdxField: "_from"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_to", IdxField: "_to"},
+		{Collection: "sbom2purl", IdxName: "sbom2purl_version", IdxField: "version"},
 		{Collection: "cve2purl", IdxName: "cve2purl_from", IdxField: "_from"},
 		{Collection: "cve2purl", IdxName: "cve2purl_to", IdxField: "_to"},
 	}
@@ -259,6 +269,80 @@ func InitializeDatabase() DBConnection {
 			if err != nil {
 				logger.Sugar().Fatalln("Error creating index:", err)
 			}
+		}
+	}
+
+	//
+	// Create composite indexes (multi-field indexes)
+	//
+
+	// Composite index for release lookup by name + version
+	releaseNameVersionIdx := "release_name_version"
+	found := false
+	if indexes, err := collections["release"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if releaseNameVersionIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &False,
+			Name:   releaseNameVersionIdx,
+		}
+		_, _, err = collections["release"].EnsurePersistentIndex(ctx, []string{"name", "version"}, &compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		}
+	}
+
+	// Composite index for sbom2purl edge lookup by _to + version
+	sbom2purlToVersionIdx := "sbom2purl_to_version"
+	found = false
+	if indexes, err := collections["sbom2purl"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if sbom2purlToVersionIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &False,
+			Name:   sbom2purlToVersionIdx,
+		}
+		_, _, err = collections["sbom2purl"].EnsurePersistentIndex(ctx, []string{"_to", "version"}, &compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		}
+	}
+
+	// Unique index on PURL to prevent duplicates
+	purlUniqueIdx := "purl_unique"
+	found = false
+	if indexes, err := collections["purl"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if purlUniqueIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		True := true
+		uniqueIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &True,
+			Sparse: &False,
+			Name:   purlUniqueIdx,
+		}
+		_, _, err = collections["purl"].EnsurePersistentIndex(ctx, []string{"purl"}, &uniqueIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating unique index on purl:", err)
 		}
 	}
 
