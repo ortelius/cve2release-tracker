@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/package-url/packageurl-go"
 	"gopkg.in/yaml.v2"
 )
 
@@ -149,4 +150,23 @@ func GetStringOrDefault(value, defaultValue string) string {
 		return defaultValue
 	}
 	return value
+}
+
+// CleanPURL removes qualifiers (after ?) and subpath (after #) to create canonical PURL
+func CleanPURL(purlStr string) (string, error) {
+	parsed, err := packageurl.FromString(purlStr)
+	if err != nil {
+		return "", err
+	}
+
+	// Create new PURL without qualifiers and subpath
+	cleaned := packageurl.PackageURL{
+		Type:      parsed.Type,
+		Namespace: parsed.Namespace,
+		Name:      parsed.Name,
+		Version:   parsed.Version,
+		// Qualifiers and Subpath are intentionally omitted
+	}
+
+	return cleaned.ToString(), nil
 }

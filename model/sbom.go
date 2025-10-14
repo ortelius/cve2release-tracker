@@ -5,10 +5,10 @@ import "encoding/json"
 
 // SBOM defines a CycloneDX SBOM in JSON format
 type SBOM struct {
-	Key     string          `json:"_key,omitempty"`
-	Cid     string          `json:"cid,omitempty"`
-	ObjType string          `json:"objtype,omitempty"`
-	Content json.RawMessage `json:"content"`
+	Key        string          `json:"_key,omitempty"`
+	ContentSha string          `json:"contentsha,omitempty"` // SHA256 hash of content for deduplication
+	ObjType    string          `json:"objtype,omitempty"`
+	Content    json.RawMessage `json:"content"`
 }
 
 // NewSBOM is the contructor that sets the appropriate default values

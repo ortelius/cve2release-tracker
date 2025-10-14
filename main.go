@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"log"
 	"os"
@@ -11,9 +13,9 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
-	"github.com/ortelius/scec-db/database"
-	"github.com/ortelius/scec-db/model"
-	"github.com/package-url/packageurl-go"
+	"github.com/ortelius/cve2release-tracker/database"
+	"github.com/ortelius/cve2release-tracker/model"
+	"github.com/ortelius/cve2release-tracker/util"
 )
 
 var db database.DBConnection
@@ -24,23 +26,38 @@ type ReleaseWithSBOMResponse struct {
 	Message string `json:"message"`
 }
 
-// cleanPURL removes qualifiers (after ?) and subpath (after #) to create canonical PURL
-func cleanPURL(purlStr string) (string, error) {
-	parsed, err := packageurl.FromString(purlStr)
-	if err != nil {
-		return "", err
-	}
+// ReleaseListItem represents a simplified release for list view
+type ReleaseListItem struct {
+	Key     string `json:"_key"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
 
-	// Create new PURL without qualifiers and subpath
-	cleaned := packageurl.PackageURL{
-		Type:      parsed.Type,
-		Namespace: parsed.Namespace,
-		Name:      parsed.Name,
-		Version:   parsed.Version,
-		// Qualifiers and Subpath are intentionally omitted
-	}
+// getSBOMContentHash calculates SHA256 hash of SBOM content
+func getSBOMContentHash(sbom model.SBOM) string {
+	hash := sha256.Sum256(sbom.Content)
+	return hex.EncodeToString(hash[:])
+}
 
-	return cleaned.ToString(), nil
+// populateContentSha sets the ContentSha field based on project type
+func populateContentSha(release *model.ProjectRelease) {
+	// Use DockerSha for docker/container projects, otherwise use GitCommit
+	if release.ProjectType == "docker" || release.ProjectType == "container" {
+		if release.DockerSha != "" {
+			release.ContentSha = release.DockerSha
+		} else if release.GitCommit != "" {
+			// Fallback to GitCommit if DockerSha not available
+			release.ContentSha = release.GitCommit
+		}
+	} else {
+		// For all other project types, use GitCommit
+		if release.GitCommit != "" {
+			release.ContentSha = release.GitCommit
+		} else if release.DockerSha != "" {
+			// Fallback to DockerSha if GitCommit not available
+			release.ContentSha = release.DockerSha
+		}
+	}
 }
 
 // processSBOMComponents extracts PURLs from SBOM and creates hub-spoke relationships
@@ -63,7 +80,7 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 		}
 
 		// Validate and clean PURL format
-		cleanedPurl, err := cleanPURL(component.Purl)
+		cleanedPurl, err := util.CleanPURL(component.Purl)
 		if err != nil {
 			// Skip invalid PURLs
 			continue
@@ -76,7 +93,7 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 		}
 
 		// Create edge from SBOM to PURL (sbom2purl)
-		edge := map[string]any{
+		edge := map[string]interface{}{
 			"_from": sbomID,
 			"_to":   purlID,
 		}
@@ -109,11 +126,13 @@ func findOrCreatePURL(ctx context.Context, purlStr string) (string, string, erro
 			LIMIT 1
 			RETURN p
 	`
-	bindVars := map[string]any{
+	bindVars := map[string]interface{}{
 		"purl": purlStr,
 	}
 
-	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{BindVars: bindVars})
+	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
 	if err != nil {
 		return "", "", err
 	}
@@ -130,10 +149,8 @@ func findOrCreatePURL(ctx context.Context, purlStr string) (string, string, erro
 	}
 
 	// Create new PURL if it doesn't exist
-	newPURL := model.PURL{
-		Purl:    purlStr,
-		ObjType: "PURL",
-	}
+	newPURL := model.NewPURL()
+	newPURL.Purl = purlStr
 
 	meta, err := db.Collections["purl"].CreateDocument(ctx, newPURL)
 	if err != nil {
@@ -151,13 +168,15 @@ func checkEdgeExists(ctx context.Context, edgeCollection, fromID, toID string) (
 			LIMIT 1
 			RETURN e
 	`
-	bindVars := map[string]any{
+	bindVars := map[string]interface{}{
 		"@edgeCollection": edgeCollection,
 		"from":            fromID,
 		"to":              toID,
 	}
 
-	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{BindVars: bindVars})
+	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
 	if err != nil {
 		return false, err
 	}
@@ -186,7 +205,7 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 	if req.Name == "" || req.Version == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(ReleaseWithSBOMResponse{
 			Success: false,
-			Message: "Release name, and version are required fields",
+			Message: "Release name and version are required fields",
 		})
 	}
 
@@ -217,41 +236,111 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 
 	ctx := context.Background()
 
-	// Save ProjectRelease to ArangoDB
-	releaseMeta, err := db.Collections["release"].CreateDocument(ctx, req.ProjectRelease)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
-			Success: false,
-			Message: "Failed to save release: " + err.Error(),
-		})
-	}
-	req.Key = releaseMeta.Key
+	// ============================================================================
+	// HYBRID APPROACH: Composite key for Release, Content hash for SBOM
+	// ============================================================================
 
-	// Save SBOM to ArangoDB
-	sbomMeta, err := db.Collections["sbom"].CreateDocument(ctx, req.SBOM)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
-			Success: false,
-			Message: "Failed to save SBOM: " + err.Error(),
-		})
-	}
-	req.SBOM.Key = sbomMeta.Key
+	// Populate ContentSha based on project type
+	populateContentSha(&req.ProjectRelease)
 
-	// Create edge relationship between release and sbom
-	edge := map[string]any{
-		"_from": "release/" + releaseMeta.Key,
-		"_to":   "sbom/" + sbomMeta.Key,
+	// Validate ContentSha is set
+	if req.ContentSha == "" {
+		return c.Status(fiber.StatusBadRequest).JSON(ReleaseWithSBOMResponse{
+			Success: false,
+			Message: "ContentSha is required (GitCommit or DockerSha must be provided)",
+		})
 	}
-	_, err = db.Collections["release2sbom"].CreateDocument(ctx, edge)
+
+	// Check for existing release by composite natural key (name + version + contentsha)
+	existingReleaseKey, err := database.FindReleaseByCompositeKey(ctx, db.Database,
+		req.Name,
+		req.Version,
+		req.ContentSha,
+	)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
 			Success: false,
-			Message: "Failed to create release-sbom relationship: " + err.Error(),
+			Message: "Failed to check for existing release: " + err.Error(),
 		})
+	}
+
+	var releaseID string
+
+	if existingReleaseKey != "" {
+		// Release already exists, use existing key
+		releaseID = "release/" + existingReleaseKey
+		req.ProjectRelease.Key = existingReleaseKey
+	} else {
+		// Save new ProjectRelease to ArangoDB
+		releaseMeta, err := db.Collections["release"].CreateDocument(ctx, req.ProjectRelease)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
+				Success: false,
+				Message: "Failed to save release: " + err.Error(),
+			})
+		}
+		releaseID = "release/" + releaseMeta.Key
+		req.ProjectRelease.Key = releaseMeta.Key
+	}
+
+	// Calculate content hash for SBOM (stored in ContentSha field)
+	sbomHash := getSBOMContentHash(req.SBOM)
+	req.SBOM.ContentSha = sbomHash
+
+	// Check if SBOM with this content hash already exists
+	existingSBOMKey, err := database.FindSBOMByContentHash(ctx, db.Database, sbomHash)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
+			Success: false,
+			Message: "Failed to check for existing SBOM: " + err.Error(),
+		})
+	}
+
+	var sbomID string
+
+	if existingSBOMKey != "" {
+		// SBOM already exists, use existing key
+		sbomID = "sbom/" + existingSBOMKey
+		req.SBOM.Key = existingSBOMKey
+	} else {
+		// Save new SBOM to ArangoDB
+		sbomMeta, err := db.Collections["sbom"].CreateDocument(ctx, req.SBOM)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
+				Success: false,
+				Message: "Failed to save SBOM: " + err.Error(),
+			})
+		}
+		sbomID = "sbom/" + sbomMeta.Key
+		req.SBOM.Key = sbomMeta.Key
+	}
+
+	// Check if edge relationship already exists
+	edgeExists, err := checkEdgeExists(ctx, "release2sbom", releaseID, sbomID)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
+			Success: false,
+			Message: "Failed to check edge existence: " + err.Error(),
+		})
+	}
+
+	if !edgeExists {
+		// Create edge relationship between release and sbom
+		edge := map[string]interface{}{
+			"_from": releaseID,
+			"_to":   sbomID,
+		}
+		_, err = db.Collections["release2sbom"].CreateDocument(ctx, edge)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
+				Success: false,
+				Message: "Failed to create release-sbom relationship: " + err.Error(),
+			})
+		}
 	}
 
 	// Process SBOM components and create PURL relationships
-	err = processSBOMComponents(ctx, req.SBOM, "sbom/"+sbomMeta.Key)
+	err = processSBOMComponents(ctx, req.SBOM, sbomID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
 			Success: false,
@@ -260,9 +349,18 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 	}
 
 	// Return success response
+	message := "Release and SBOM created successfully"
+	if existingReleaseKey != "" && existingSBOMKey != "" {
+		message = "Release and SBOM already exist (matched by name+version+contentsha and content hash)"
+	} else if existingReleaseKey != "" {
+		message = "Release already exists (matched by name+version+contentsha), SBOM created and linked"
+	} else if existingSBOMKey != "" {
+		message = "SBOM already exists (matched by content hash), Release created and linked"
+	}
+
 	return c.Status(fiber.StatusCreated).JSON(ReleaseWithSBOMResponse{
 		Success: true,
-		Message: "Release and SBOM created successfully",
+		Message: message,
 	})
 }
 
@@ -291,12 +389,14 @@ func GetReleaseWithSBOM(c *fiber.Ctx) error {
 			LIMIT 1
 			RETURN r
 	`
-	bindVars := map[string]any{
+	bindVars := map[string]interface{}{
 		"name":    name,
 		"version": version,
 	}
 
-	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{BindVars: bindVars})
+	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
@@ -329,7 +429,9 @@ func GetReleaseWithSBOM(c *fiber.Ctx) error {
 				RETURN v
 	`
 
-	sbomCursor, err := db.Database.Query(ctx, sbomQuery, &arangodb.QueryOptions{BindVars: bindVars})
+	sbomCursor, err := db.Database.Query(ctx, sbomQuery, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"success": false,
@@ -362,13 +464,6 @@ func GetReleaseWithSBOM(c *fiber.Ctx) error {
 // ============================================================================
 // LIST Handlers
 // ============================================================================
-
-// ReleaseListItem represents a simplified release for list view
-type ReleaseListItem struct {
-	Key     string `json:"_key"`
-	Name    string `json:"name"`
-	Version string `json:"version"`
-}
 
 // ListReleases handles GET requests for listing all releases with key, name, and version
 func ListReleases(c *fiber.Ctx) error {
@@ -424,7 +519,7 @@ func main() {
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		AppName: "SCEC-DB API v1.0",
+		AppName: "CVE2Release-Tracker API v1.0",
 	})
 
 	// Middleware

@@ -1,7 +1,7 @@
 package main
 
 import (
-	"github.com/ortelius/scec-db/cmd"
+	"github.com/ortelius/cve2release-tracker/cmd"
 )
 
 func main() {

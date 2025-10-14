@@ -1,4 +1,4 @@
-module github.com/ortelius/scec-db
+module github.com/ortelius/cve2release-tracker
 
 go 1.25.3
 

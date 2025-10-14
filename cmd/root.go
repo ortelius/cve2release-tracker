@@ -9,17 +9,10 @@ import (
 	"os"
 	"time"
 
-	"github.com/ortelius/scec-db/model"
-	"github.com/ortelius/scec-db/util"
+	"github.com/ortelius/cve2release-tracker/model"
+	"github.com/ortelius/cve2release-tracker/util"
 	"github.com/spf13/cobra"
 )
-
-// ReleaseWithSBOM combines both ProjectRelease and SBOM for API requests/responses
-// This matches the server's handler model
-type ReleaseWithSBOM struct {
-	model.ProjectRelease
-	SBOM model.SBOM `json:"sbom"`
-}
 
 var (
 	serverURL   string
@@ -30,9 +23,9 @@ var (
 
 // rootCmd represents the base command
 var rootCmd = &cobra.Command{
-	Use:   "scec-cli",
-	Short: "SCEC Database CLI for managing releases and SBOMs",
-	Long: `A CLI tool for interacting with the SCEC Database API.
+	Use:   "cve2release-cli",
+	Short: "CVE2Release-Tracker CLI for managing releases and SBOMs",
+	Long: `A CLI tool for interacting with the CVE2Release-Tracker API.
 Collects git metadata from the local repository and posts
 releases with their associated SBOMs.`,
 }
@@ -40,9 +33,9 @@ releases with their associated SBOMs.`,
 // uploadCmd represents the upload command
 var uploadCmd = &cobra.Command{
 	Use:   "upload",
-	Short: "Upload a release with SBOM to the SCEC database",
+	Short: "Upload a release with SBOM to the CVE2Release-Tracker database",
 	Long: `Collects git metadata from the current repository and uploads
-a release along with its SBOM to the SCEC database.`,
+a release along with its SBOM to the CVE2Release-Tracker database.`,
 	RunE: runUpload,
 }
 
@@ -50,12 +43,12 @@ func init() {
 	rootCmd.AddCommand(uploadCmd)
 
 	// Persistent flags available to all commands
-	rootCmd.PersistentFlags().StringVar(&serverURL, "server", "http://localhost:3000", "SCEC API server URL")
+	rootCmd.PersistentFlags().StringVar(&serverURL, "server", "http://localhost:3000", "CVE2Release-Tracker API server URL")
 	rootCmd.PersistentFlags().BoolVarP(&verbose, "verbose", "v", false, "Enable verbose output")
 
 	// Upload command specific flags
 	uploadCmd.Flags().StringVarP(&sbomFile, "sbom", "s", "", "Path to SBOM file (required)")
-	uploadCmd.Flags().StringVarP(&projectType, "type", "t", "application", "Project type (application, library, etc.)")
+	uploadCmd.Flags().StringVarP(&projectType, "type", "t", "application", "Project type (application, library, docker, etc.)")
 	uploadCmd.MarkFlagRequired("sbom")
 }
 
@@ -64,6 +57,27 @@ func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
 		os.Exit(1)
+	}
+}
+
+// populateContentSha sets the ContentSha field based on project type
+func populateContentSha(release *model.ProjectRelease) {
+	// Use DockerSha for docker/container projects, otherwise use GitCommit
+	if release.ProjectType == "docker" || release.ProjectType == "container" {
+		if release.DockerSha != "" {
+			release.ContentSha = release.DockerSha
+		} else if release.GitCommit != "" {
+			// Fallback to GitCommit if DockerSha not available
+			release.ContentSha = release.GitCommit
+		}
+	} else {
+		// For all other project types, use GitCommit
+		if release.GitCommit != "" {
+			release.ContentSha = release.GitCommit
+		} else if release.DockerSha != "" {
+			// Fallback to DockerSha if GitCommit not available
+			release.ContentSha = release.DockerSha
+		}
 	}
 }
 
@@ -80,7 +94,7 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	}
 
 	// Validate SBOM is valid JSON
-	var sbomJSON map[string]any
+	var sbomJSON map[string]interface{}
 	if err := json.Unmarshal(sbomContent, &sbomJSON); err != nil {
 		return fmt.Errorf("SBOM file is not valid JSON: %w", err)
 	}
@@ -116,13 +130,16 @@ func runUpload(cmd *cobra.Command, args []string) error {
 	sbom.Content = json.RawMessage(sbomContent)
 
 	// Create the combined request using ReleaseWithSBOM structure
-	request := ReleaseWithSBOM{
+	request := model.ReleaseWithSBOM{
 		ProjectRelease: *release,
 		SBOM:           *sbom,
 	}
 
 	if verbose {
 		fmt.Printf("Uploading release: %s version %s\n", release.Name, release.Version)
+		if release.ContentSha != "" {
+			fmt.Printf("ContentSha: %s\n", release.ContentSha)
+		}
 	}
 
 	// Send POST request
@@ -188,6 +205,9 @@ func buildRelease(mapping map[string]string, projectType string) *model.ProjectR
 			release.GitCommitTimestamp = t
 		}
 	}
+
+	// Populate ContentSha based on project type
+	populateContentSha(release)
 
 	return release
 }
@@ -361,7 +381,7 @@ func runGet(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("server returned status %d: %s", resp.StatusCode, string(body))
 	}
 
-	var result ReleaseWithSBOM
+	var result model.ReleaseWithSBOM
 
 	if err := json.Unmarshal(body, &result); err != nil {
 		return fmt.Errorf("failed to parse response: %w", err)
@@ -389,10 +409,12 @@ func runGet(cmd *cobra.Command, args []string) error {
 	fmt.Printf("Release: %s\n", result.Name)
 	fmt.Printf("Version: %s\n", result.Version)
 	fmt.Printf("Type: %s\n", result.ProjectType)
+	fmt.Printf("ContentSha: %s\n", result.ContentSha)
 	fmt.Printf("Git Commit: %s\n", result.GitCommit)
 	fmt.Printf("Git Branch: %s\n", result.GitBranch)
 	fmt.Printf("Docker Repo: %s\n", result.DockerRepo)
 	fmt.Printf("Docker Tag: %s\n", result.DockerTag)
+	fmt.Printf("Docker SHA: %s\n", result.DockerSha)
 	fmt.Println()
 
 	// Handle SBOM output

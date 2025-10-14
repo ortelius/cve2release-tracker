@@ -11,6 +11,7 @@ type ProjectRelease struct {
 	Name                     string    `json:"name"`
 	Version                  string    `json:"version"`
 	ProjectType              string    `json:"projecttype,omitempty"`
+	ContentSha               string    `json:"contentsha,omitempty"` // Git commit or Docker SHA for deduplication
 	Basename                 string    `json:"basename,omitempty"`
 	BuildDate                time.Time `json:"builddate,omitempty"`
 	BuildID                  string    `json:"buildid,omitempty"`

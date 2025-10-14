@@ -1,25 +1,21 @@
-// Package database - Handles all interaction with ArangoDB and Long Term Storage (LTS).
-// Contains utility functions for marshaling/unmarshaling json to cid/nfts
+// Package database - Handles all interaction with ArangoDB
 package database
 
 import (
 	"context"
 	"crypto/tls"
+	"fmt"
 	"net"
 	"net/http"
+	"os"
 	"time"
-
-	"fmt"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/arangodb/go-driver/v2/connection"
 	"github.com/cenkalti/backoff"
-	"github.com/ortelius/scec-db/util"
 	"go.uber.org/zap"
 	"go.uber.org/zap/zapcore"
 )
-
-//lint:file-ignore S1034 Ignore all assignments for switch statements
 
 var logger = InitLogger() // setup the logger
 
@@ -38,6 +34,15 @@ type indexConfig struct {
 
 var initDone = false          // has the data been initialized
 var dbConnection DBConnection // database connection definition
+
+// GetEnvDefault is a convenience function for handling env vars
+func GetEnvDefault(key, defVal string) string {
+	val, ex := os.LookupEnv(key) // get the env var
+	if !ex {                     // not found return default
+		return defVal
+	}
+	return val // return value for env var
+}
 
 // InitLogger sets up the Zap Logger to log to the console in a human readable format
 func InitLogger() *zap.Logger {
@@ -72,7 +77,6 @@ func dbConnectionConfig(endpoint connection.Endpoint, dbuser string, dbpass stri
 
 // InitializeDatabase is the function for connecting to the db engine, creating the database and collections
 func InitializeDatabase() DBConnection {
-
 	const initialInterval = 10 * time.Second
 	const maxInterval = 2 * time.Minute
 
@@ -87,16 +91,16 @@ func InitializeDatabase() DBConnection {
 	}
 
 	False := false
-	dbhost := util.GetEnvDefault("ARANGO_HOST", "localhost")
-	dbport := util.GetEnvDefault("ARANGO_PORT", "8529")
-	dbuser := util.GetEnvDefault("ARANGO_USER", "root")
-	dbpass := util.GetEnvDefault("ARANGO_PASS", "")
-	dburl := util.GetEnvDefault("ARANGO_URL", "http://"+dbhost+":"+dbport)
+	dbhost := GetEnvDefault("ARANGO_HOST", "localhost")
+	dbport := GetEnvDefault("ARANGO_PORT", "8529")
+	dbuser := GetEnvDefault("ARANGO_USER", "root")
+	dbpass := GetEnvDefault("ARANGO_PASS", "")
+	dburl := GetEnvDefault("ARANGO_URL", "http://"+dbhost+":"+dbport)
 
 	var client arangodb.Client
 
 	//
-	// Database connection with backuoff retry
+	// Database connection with backoff retry
 	//
 
 	// Configure exponential backoff
@@ -148,7 +152,7 @@ func InitializeDatabase() DBConnection {
 	if exists {
 		var options arangodb.GetDatabaseOptions
 		if db, err = client.GetDatabase(ctx, databaseName, &options); err != nil {
-			logger.Sugar().Fatalf("Failed to create Database: %v", err)
+			logger.Sugar().Fatalf("Failed to get Database: %v", err)
 		}
 	} else {
 		if db, err = client.CreateDatabase(ctx, databaseName, nil); err != nil {
@@ -215,8 +219,12 @@ func InitializeDatabase() DBConnection {
 	idxList := []indexConfig{
 		{Collection: "cve", IdxName: "package_name", IdxField: "affected[*].package.name"},
 		{Collection: "cve", IdxName: "package_purl", IdxField: "affected[*].package.purl"},
-		{Collection: "sbom", IdxName: "sbom_cid", IdxField: "cid"},
+		{Collection: "sbom", IdxName: "sbom_contentsha", IdxField: "contentsha"},
 		{Collection: "purl", IdxName: "purl_idx", IdxField: "purl"},
+		// Indexes for composite key lookup (release deduplication)
+		{Collection: "release", IdxName: "release_name", IdxField: "name"},
+		{Collection: "release", IdxName: "release_version", IdxField: "version"},
+		{Collection: "release", IdxName: "release_contentsha", IdxField: "contentsha"},
 		// Edge collection indexes for optimized traversals
 		{Collection: "release2sbom", IdxName: "release2sbom_from", IdxField: "_from"},
 		{Collection: "release2sbom", IdxName: "release2sbom_to", IdxField: "_to"},
@@ -227,7 +235,6 @@ func InitializeDatabase() DBConnection {
 	}
 
 	for _, idx := range idxList {
-
 		found := false
 
 		if indexes, err := collections[idx.Collection].Indexes(ctx); err == nil {
@@ -263,4 +270,74 @@ func InitializeDatabase() DBConnection {
 	}
 
 	return dbConnection
+}
+
+// FindReleaseByCompositeKey checks if a release exists by name, version, and content SHA
+// Returns the document key if found, empty string if not found
+func FindReleaseByCompositeKey(ctx context.Context, db arangodb.Database, name, version, contentSha string) (string, error) {
+	query := `
+		FOR r IN release
+			FILTER r.name == @name 
+			   AND r.version == @version 
+			   AND r.contentsha == @contentsha
+			LIMIT 1
+			RETURN r._key
+	`
+	bindVars := map[string]interface{}{
+		"name":       name,
+		"version":    version,
+		"contentsha": contentSha,
+	}
+
+	cursor, err := db.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer cursor.Close()
+
+	if cursor.HasMore() {
+		var key string
+		_, err := cursor.ReadDocument(ctx, &key)
+		if err != nil {
+			return "", err
+		}
+		return key, nil
+	}
+
+	return "", nil
+}
+
+// FindSBOMByContentHash checks if an SBOM exists by content hash
+// Returns the document key if found, empty string if not found
+func FindSBOMByContentHash(ctx context.Context, db arangodb.Database, contentHash string) (string, error) {
+	query := `
+		FOR s IN sbom
+			FILTER s.contentsha == @hash
+			LIMIT 1
+			RETURN s._key
+	`
+	bindVars := map[string]interface{}{
+		"hash": contentHash,
+	}
+
+	cursor, err := db.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
+	if err != nil {
+		return "", err
+	}
+	defer cursor.Close()
+
+	if cursor.HasMore() {
+		var key string
+		_, err := cursor.ReadDocument(ctx, &key)
+		if err != nil {
+			return "", err
+		}
+		return key, nil
+	}
+
+	return "", nil
 }
