@@ -34,6 +34,14 @@ type ReleaseListItem struct {
 	Version string `json:"version"`
 }
 
+// edgeInfo holds edge information for batch processing
+type edgeInfo struct {
+	from     string
+	to       string
+	version  string
+	fullPurl string
+}
+
 // getSBOMContentHash calculates SHA256 hash of SBOM content
 func getSBOMContentHash(sbom model.SBOM) string {
 	hash := sha256.Sum256(sbom.Content)
@@ -62,7 +70,7 @@ func populateContentSha(release *model.ProjectRelease) {
 }
 
 // processSBOMComponents extracts PURLs from SBOM and creates hub-spoke relationships
-// Now stores version information in edges for CVE matching
+// Now uses batch processing for better performance
 func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) error {
 	// Parse SBOM content to extract components
 	var sbomData struct {
@@ -75,7 +83,16 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 		return err
 	}
 
-	// Process each component and create PURL relationships
+	// Step 1: Collect and process all PURLs
+	type purlInfo struct {
+		basePurl string
+		version  string
+		fullPurl string
+	}
+
+	var purlInfos []purlInfo
+	basePurlSet := make(map[string]bool) // For deduplication
+
 	for _, component := range sbomData.Components {
 		if component.Purl == "" {
 			continue
@@ -84,137 +101,267 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 		// Validate and clean PURL format
 		cleanedPurl, err := util.CleanPURL(component.Purl)
 		if err != nil {
-			// Skip invalid PURLs
+			// Log but continue with other PURLs
+			log.Printf("Failed to clean PURL %s: %v", component.Purl, err)
 			continue
 		}
 
 		// Parse to extract version
 		parsed, err := util.ParsePURL(cleanedPurl)
 		if err != nil {
+			log.Printf("Failed to parse PURL %s: %v", cleanedPurl, err)
 			continue
 		}
 
 		// Get base PURL (without version) for hub matching
 		basePurl, err := util.GetBasePURL(cleanedPurl)
 		if err != nil {
+			log.Printf("Failed to get base PURL from %s: %v", cleanedPurl, err)
 			continue
 		}
 
-		// Find or create PURL document using base PURL
-		purlKey, purlID, err := findOrCreatePURL(ctx, basePurl)
+		purlInfos = append(purlInfos, purlInfo{
+			basePurl: basePurl,
+			version:  parsed.Version,
+			fullPurl: cleanedPurl,
+		})
+
+		basePurlSet[basePurl] = true
+	}
+
+	if len(purlInfos) == 0 {
+		return nil // No valid PURLs to process
+	}
+
+	// Step 2: Batch find/create all unique base PURLs
+	uniqueBasePurls := make([]string, 0, len(basePurlSet))
+	for basePurl := range basePurlSet {
+		uniqueBasePurls = append(uniqueBasePurls, basePurl)
+	}
+
+	purlIDMap, err := batchFindOrCreatePURLs(ctx, uniqueBasePurls)
+	if err != nil {
+		return err
+	}
+
+	// Step 3: Prepare all edges for batch insertion
+
+	var edgesToCreate []edgeInfo
+	edgeCheckMap := make(map[string]bool) // For deduplication: "from:to:version"
+
+	for _, info := range purlInfos {
+		purlID, exists := purlIDMap[info.basePurl]
+		if !exists {
+			log.Printf("Warning: PURL ID not found for base PURL %s", info.basePurl)
+			continue
+		}
+
+		// Create unique key for edge deduplication
+		edgeKey := sbomID + ":" + purlID + ":" + info.version
+		if edgeCheckMap[edgeKey] {
+			continue // Skip duplicate
+		}
+		edgeCheckMap[edgeKey] = true
+
+		edgesToCreate = append(edgesToCreate, edgeInfo{
+			from:     sbomID,
+			to:       purlID,
+			version:  info.version,
+			fullPurl: info.fullPurl,
+		})
+	}
+
+	if len(edgesToCreate) == 0 {
+		return nil // No edges to create
+	}
+
+	// Step 4: Batch check which edges already exist
+	existingEdges, err := batchCheckEdgesExist(ctx, "sbom2purl", edgesToCreate)
+	if err != nil {
+		return err
+	}
+
+	// Step 5: Batch insert only non-existing edges
+	var newEdges []map[string]interface{}
+	for _, edge := range edgesToCreate {
+		edgeKey := edge.from + ":" + edge.to + ":" + edge.version
+		if !existingEdges[edgeKey] {
+			newEdges = append(newEdges, map[string]interface{}{
+				"_from":     edge.from,
+				"_to":       edge.to,
+				"version":   edge.version,
+				"full_purl": edge.fullPurl,
+			})
+		}
+	}
+
+	if len(newEdges) > 0 {
+		err = batchInsertEdges(ctx, "sbom2purl", newEdges)
 		if err != nil {
 			return err
 		}
-
-		// Create edge from SBOM to PURL with version information
-		edge := map[string]interface{}{
-			"_from":     sbomID,
-			"_to":       purlID,
-			"version":   parsed.Version, // Store the specific version
-			"full_purl": cleanedPurl,    // Store complete PURL with version
-		}
-
-		// Check if edge already exists with this version
-		edgeExists, err := checkEdgeExistsWithVersion(ctx, "sbom2purl", sbomID, purlID, parsed.Version)
-		if err != nil {
-			return err
-		}
-
-		if !edgeExists {
-			_, err = db.Collections["sbom2purl"].CreateDocument(ctx, edge)
-			if err != nil {
-				return err
-			}
-		}
-
-		_ = purlKey // purlKey available for future use
 	}
 
 	return nil
 }
 
-// findOrCreatePURL finds an existing PURL or creates a new one, returns key and ID
-// Uses base PURL (without version) for hub-and-spoke matching
-func findOrCreatePURL(ctx context.Context, basePurl string) (string, string, error) {
-	// Query to find existing PURL by base form
+// batchFindOrCreatePURLs finds or creates multiple PURLs in a single query
+// Returns a map of basePurl -> purlID
+func batchFindOrCreatePURLs(ctx context.Context, basePurls []string) (map[string]string, error) {
+	if len(basePurls) == 0 {
+		return make(map[string]string), nil
+	}
+
+	// Single query to upsert all PURLs and return their IDs
 	query := `
-		FOR p IN purl
-			FILTER p.purl == @purl
-			LIMIT 1
-			RETURN p
+		FOR purl IN @purls
+			LET upsertedPurl = FIRST(
+				UPSERT { purl: purl }
+				INSERT { purl: purl, objtype: "PURL" }
+				UPDATE {} IN purl
+				RETURN NEW
+			)
+			RETURN {
+				basePurl: purl,
+				purlId: CONCAT("purl/", upsertedPurl._key)
+			}
 	`
+
 	bindVars := map[string]interface{}{
-		"purl": basePurl,
+		"purls": basePurls,
 	}
 
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
 		BindVars: bindVars,
 	})
 	if err != nil {
-		return "", "", err
+		return nil, err
 	}
 	defer cursor.Close()
 
-	// If PURL exists, return it
-	if cursor.HasMore() {
-		var existingPURL model.PURL
-		_, err = cursor.ReadDocument(ctx, &existingPURL)
-		if err != nil {
-			return "", "", err
+	purlIDMap := make(map[string]string)
+	for cursor.HasMore() {
+		var result struct {
+			BasePurl string `json:"basePurl"`
+			PurlID   string `json:"purlId"`
 		}
-		return existingPURL.Key, "purl/" + existingPURL.Key, nil
+		_, err := cursor.ReadDocument(ctx, &result)
+		if err != nil {
+			return nil, err
+		}
+		purlIDMap[result.BasePurl] = result.PurlID
 	}
 
-	// Create new PURL if it doesn't exist
-	newPURL := model.NewPURL()
-	newPURL.Purl = basePurl // Store base PURL (without version)
-
-	meta, err := db.Collections["purl"].CreateDocument(ctx, newPURL)
-	if err != nil {
-		return "", "", err
-	}
-
-	return meta.Key, "purl/" + meta.Key, nil
+	return purlIDMap, nil
 }
 
-// checkEdgeExistsWithVersion checks if an edge exists with specific version
-func checkEdgeExistsWithVersion(ctx context.Context, edgeCollection, fromID, toID, version string) (bool, error) {
+// batchCheckEdgesExist checks which edges already exist in a single query
+// Returns a map of "from:to:version" -> exists
+func batchCheckEdgesExist(ctx context.Context, edgeCollection string, edges []edgeInfo) (map[string]bool, error) {
+	if len(edges) == 0 {
+		return make(map[string]bool), nil
+	}
+
+	// Prepare edge data for query
+	type edgeCheck struct {
+		From    string `json:"from"`
+		To      string `json:"to"`
+		Version string `json:"version"`
+	}
+
+	var edgeChecks []edgeCheck
+	for _, edge := range edges {
+		edgeChecks = append(edgeChecks, edgeCheck{
+			From:    edge.from,
+			To:      edge.to,
+			Version: edge.version,
+		})
+	}
+
+	// Single query to check all edges
 	query := `
-		FOR e IN @@edgeCollection
-			FILTER e._from == @from && e._to == @to && e.version == @version
-			LIMIT 1
-			RETURN e
+		FOR check IN @edges
+			LET exists = (
+				FOR e IN @@edgeCollection
+					FILTER e._from == check.from 
+					   AND e._to == check.to 
+					   AND e.version == check.version
+					LIMIT 1
+					RETURN true
+			)
+			RETURN {
+				key: CONCAT(check.from, ":", check.to, ":", check.version),
+				exists: LENGTH(exists) > 0
+			}
 	`
+
 	bindVars := map[string]interface{}{
 		"@edgeCollection": edgeCollection,
-		"from":            fromID,
-		"to":              toID,
-		"version":         version,
+		"edges":           edgeChecks,
 	}
 
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
 		BindVars: bindVars,
 	})
 	if err != nil {
-		return false, err
+		return nil, err
 	}
 	defer cursor.Close()
 
-	return cursor.HasMore(), nil
+	existsMap := make(map[string]bool)
+	for cursor.HasMore() {
+		var result struct {
+			Key    string `json:"key"`
+			Exists bool   `json:"exists"`
+		}
+		_, err := cursor.ReadDocument(ctx, &result)
+		if err != nil {
+			return nil, err
+		}
+		existsMap[result.Key] = result.Exists
+	}
+
+	return existsMap, nil
 }
 
-// checkEdgeExists checks if an edge already exists between two documents
-func checkEdgeExists(ctx context.Context, edgeCollection, fromID, toID string) (bool, error) {
+// batchInsertEdges inserts multiple edges in a single query
+func batchInsertEdges(ctx context.Context, edgeCollection string, edges []map[string]interface{}) error {
+	if len(edges) == 0 {
+		return nil
+	}
+
 	query := `
-		FOR e IN @@edgeCollection
+		FOR edge IN @edges
+			INSERT edge INTO @@edgeCollection
+	`
+
+	bindVars := map[string]interface{}{
+		"@edgeCollection": edgeCollection,
+		"edges":           edges,
+	}
+
+	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+		BindVars: bindVars,
+	})
+	if err != nil {
+		return err
+	}
+	cursor.Close()
+
+	return nil
+}
+
+// checkRelease2SBOMEdgeExists checks if a release2sbom edge already exists
+func checkRelease2SBOMEdgeExists(ctx context.Context, releaseID, sbomID string) (bool, error) {
+	query := `
+		FOR e IN release2sbom
 			FILTER e._from == @from && e._to == @to
 			LIMIT 1
 			RETURN e
 	`
 	bindVars := map[string]interface{}{
-		"@edgeCollection": edgeCollection,
-		"from":            fromID,
-		"to":              toID,
+		"from": releaseID,
+		"to":   sbomID,
 	}
 
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
@@ -359,7 +506,7 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 	}
 
 	// Check if edge relationship already exists
-	edgeExists, err := checkEdgeExists(ctx, "release2sbom", releaseID, sbomID)
+	edgeExists, err := checkRelease2SBOMEdgeExists(ctx, releaseID, sbomID)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ReleaseWithSBOMResponse{
 			Success: false,
