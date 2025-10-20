@@ -165,7 +165,7 @@ func InitializeDatabase() DBConnection {
 	//
 
 	collections = make(map[string]arangodb.Collection)
-	collectionNames := []string{"release", "sbom", "purl", "cve"}
+	collectionNames := []string{"release", "sbom", "purl", "cve", "endpoint", "sync"}
 
 	for _, collectionName := range collectionNames {
 		var col arangodb.Collection
@@ -233,6 +233,17 @@ func InitializeDatabase() DBConnection {
 		{Collection: "release", IdxName: "release_name", IdxField: "name"},
 		{Collection: "release", IdxName: "release_version", IdxField: "version"},
 		{Collection: "release", IdxName: "release_contentsha", IdxField: "contentsha"},
+
+		// Endpoint collection indexes
+		{Collection: "endpoint", IdxName: "endpoint_name", IdxField: "name"},
+		{Collection: "endpoint", IdxName: "endpoint_type", IdxField: "endpoint_type"},
+		{Collection: "endpoint", IdxName: "endpoint_environment", IdxField: "environment"},
+
+		// Sync collection indexes
+		{Collection: "sync", IdxName: "sync_release_name", IdxField: "release_name"},
+		{Collection: "sync", IdxName: "sync_release_version", IdxField: "release_version"},
+		{Collection: "sync", IdxName: "sync_endpoint_name", IdxField: "endpoint_name"},
+		{Collection: "sync", IdxName: "sync_synced_at", IdxField: "synced_at"},
 
 		// Edge collection indexes for optimized traversals
 		{Collection: "release2sbom", IdxName: "release2sbom_from", IdxField: "_from"},
@@ -319,6 +330,77 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["sbom2purl"].EnsurePersistentIndex(ctx, []string{"_to", "version"}, &compositeIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating composite index:", err)
+		}
+	}
+
+	// Composite index for sync lookup by release name + version
+	syncReleaseIdx := "sync_release_name_version"
+	found = false
+	if indexes, err := collections["sync"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if syncReleaseIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &False,
+			Name:   syncReleaseIdx,
+		}
+		_, _, err = collections["sync"].EnsurePersistentIndex(ctx, []string{"release_name", "release_version"}, &compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		}
+	}
+
+	// Unique composite index for sync to prevent duplicate syncs of same release to same endpoint
+	syncUniqueIdx := "sync_unique_release_endpoint"
+	found = false
+	if indexes, err := collections["sync"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if syncUniqueIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		True := true
+		uniqueCompositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &True,
+			Sparse: &False,
+			Name:   syncUniqueIdx,
+		}
+		_, _, err = collections["sync"].EnsurePersistentIndex(ctx, []string{"release_name", "release_version", "endpoint_name"}, &uniqueCompositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating unique composite index:", err)
+		}
+	}
+
+	// Unique index on endpoint name to prevent duplicates
+	endpointUniqueIdx := "endpoint_name_unique"
+	found = false
+	if indexes, err := collections["endpoint"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if endpointUniqueIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		True := true
+		uniqueIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &True,
+			Sparse: &False,
+			Name:   endpointUniqueIdx,
+		}
+		_, _, err = collections["endpoint"].EnsurePersistentIndex(ctx, []string{"name"}, &uniqueIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating unique index on endpoint name:", err)
 		}
 	}
 
