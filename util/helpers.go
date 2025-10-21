@@ -170,7 +170,7 @@ func CleanPURL(purlStr string) (string, error) {
 		// Qualifiers and Subpath are intentionally omitted
 	}
 
-	return cleaned.ToString(), nil
+	return strings.ToLower(cleaned.ToString()), nil
 }
 
 // GetBasePURL removes the version component from a PURL to create a base package identifier
@@ -190,7 +190,7 @@ func GetBasePURL(purlStr string) (string, error) {
 		// Version, Qualifiers and Subpath are intentionally omitted
 	}
 
-	return base.ToString(), nil
+	return strings.ToLower(base.ToString()), nil
 }
 
 // ParsePURL parses a PURL string and returns the parsed PackageURL
