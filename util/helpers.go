@@ -262,7 +262,7 @@ func isVersionInRange(version string, vrange models.Range) bool {
 	var introduced, fixed, lastAffected *semver.Version
 
 	for _, event := range vrange.Events {
-		if event.Introduced != "" && event.Introduced != "0" {
+		if event.Introduced != "" {
 			introduced, _ = semver.NewVersion(event.Introduced)
 		}
 		if event.Fixed != "" {
@@ -296,7 +296,7 @@ func isVersionInRange(version string, vrange models.Range) bool {
 func isVersionInRangeString(version string, vrange models.Range) bool {
 	for _, event := range vrange.Events {
 		// Simple string comparison for non-semver versions
-		if event.Introduced != "" && event.Introduced != "0" {
+		if event.Introduced != "" {
 			if version < event.Introduced {
 				return false
 			}
