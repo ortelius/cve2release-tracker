@@ -222,6 +222,8 @@ func InitializeDatabase() DBConnection {
 		{Collection: "cve", IdxName: "package_purl", IdxField: "affected[*].package.purl"},
 		{Collection: "cve", IdxName: "cve_osv_id", IdxField: "osv.id"},
 		{Collection: "cve", IdxName: "cve_id", IdxField: "id"},
+		{Collection: "cve", IdxName: "cve_severity_rating", IdxField: "database_specific.severity_rating"}, // NEW
+		{Collection: "cve", IdxName: "cve_severity_score", IdxField: "database_specific.cvss_base_score"},  // NEW
 
 		// SBOM collection indexes
 		{Collection: "sbom", IdxName: "sbom_contentsha", IdxField: "contentsha"},
