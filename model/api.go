@@ -9,22 +9,10 @@ type ReleaseWithSBOM struct {
 	SBOM SBOM `json:"sbom"`
 }
 
-// Sync represents the association between a release and an endpoint (deployment)
-type Sync struct {
-	Key            string    `json:"_key,omitempty"`
-	ReleaseName    string    `json:"release_name"`
-	ReleaseVersion string    `json:"release_version"`
-	EndpointName   string    `json:"endpoint_name"`
-	SyncedAt       time.Time `json:"synced_at"`
-	ObjType        string    `json:"objtype,omitempty"`
-}
-
-// NewSync creates a new Sync instance with default values
-func NewSync() *Sync {
-	return &Sync{
-		ObjType:  "Sync",
-		SyncedAt: time.Now(),
-	}
+// SyncWithEndpoint combines Sync and Endpoint for API communication
+type SyncWithEndpoint struct {
+	Sync
+	Endpoint Endpoint `json:"endpoint"`
 }
 
 // AffectedRelease represents a release that is affected by a CVE
