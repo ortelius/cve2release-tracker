@@ -3,7 +3,9 @@ module github.com/ortelius/cve2release-tracker
 go 1.25.3
 
 require (
-	github.com/Masterminds/semver/v3 v3.2.1
+	github.com/Masterminds/semver/v3 v3.4.0
+	github.com/aquasecurity/go-npm-version v0.0.2
+	github.com/aquasecurity/go-pep440-version v0.0.1
 	github.com/arangodb/go-driver/v2 v2.1.5
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/gofiber/fiber/v2 v2.52.9
@@ -16,6 +18,7 @@ require (
 
 require (
 	github.com/andybalholm/brotli v1.2.0 // indirect
+	github.com/aquasecurity/go-version v0.0.1 // indirect
 	github.com/arangodb/go-velocypack v0.0.0-20200318135517-5af53c29c67e // indirect
 	github.com/clipperhouse/uax29/v2 v2.2.0 // indirect
 	github.com/dchest/siphash v1.2.3 // indirect
@@ -40,5 +43,6 @@ require (
 	golang.org/x/net v0.46.0 // indirect
 	golang.org/x/sys v0.37.0 // indirect
 	golang.org/x/text v0.30.0 // indirect
+	golang.org/x/xerrors v0.0.0-20231012003039-104605ab7028 // indirect
 	gopkg.in/check.v1 v1.0.0-20201130134442-10cb98267c6c // indirect
 )

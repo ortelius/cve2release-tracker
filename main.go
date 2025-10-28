@@ -812,9 +812,6 @@ func GetReleaseWithSBOM(c *fiber.Ctx) error {
 // CVE Analysis Handlers
 // ============================================================================
 
-// REPLACE GetReleaseVulnerabilities with this version that uses the cve2purl edges
-// This is the TRUE hub-and-spoke approach - should be VERY fast
-
 func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 	name := c.Params("name")
 	version := c.Params("version")
@@ -865,6 +862,8 @@ func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 								summary: cve.summary,
 								details: cve.details,
 								severity: cve.severity,
+								severity_score: cve.database_specific.cvss_base_score,
+								severity_rating: cve.database_specific.severity_rating,
 								published: cve.published,
 								modified: cve.modified,
 								aliases: cve.aliases,
@@ -895,6 +894,8 @@ func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 		Summary        string            `json:"summary"`
 		Details        string            `json:"details"`
 		Severity       []models.Severity `json:"severity"`
+		SeverityScore  float64           `json:"severity_score"`
+		SeverityRating string            `json:"severity_rating"`
 		Published      string            `json:"published"`
 		Modified       string            `json:"modified"`
 		Aliases        []string          `json:"aliases"`
@@ -902,6 +903,23 @@ func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 		PackageVersion string            `json:"package_version"`
 		FullPurl       string            `json:"full_purl"`
 		AffectedData   models.Affected   `json:"affected_data"`
+	}
+
+	// Helper function to extract fixed versions from affected data
+	extractFixedVersions := func(affected models.Affected) []string {
+		var fixedVersions []string
+		seen := make(map[string]bool)
+
+		for _, vrange := range affected.Ranges {
+			for _, event := range vrange.Events {
+				if event.Fixed != "" && !seen[event.Fixed] {
+					fixedVersions = append(fixedVersions, event.Fixed)
+					seen[event.Fixed] = true
+				}
+			}
+		}
+
+		return fixedVersions
 	}
 
 	var vulnerabilities []map[string]interface{}
@@ -914,8 +932,6 @@ func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 		if err != nil {
 			continue
 		}
-		b, _ := json.MarshalIndent(result, "", "  ")
-		fmt.Println(string(b))
 
 		candidateCount++
 
@@ -931,26 +947,32 @@ func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 		}
 		seen[key] = true
 
-		// Extract severity score
-		var severity string
+		// Extract CVSS_V3 score from severity array (fallback)
+		var cvssScore string
 		for _, sev := range result.Severity {
 			if sev.Type == "CVSS_V3" {
-				severity = sev.Score
+				cvssScore = sev.Score
 				break
 			}
 		}
+
+		// Extract fixed versions
+		fixedVersions := extractFixedVersions(result.AffectedData)
 
 		vulnerabilities = append(vulnerabilities, map[string]interface{}{
 			"cve_id":           result.CveID,
 			"summary":          result.Summary,
 			"details":          result.Details,
-			"severity":         severity,
+			"severity_score":   result.SeverityScore,
+			"severity_rating":  result.SeverityRating,
+			"cvss_v3_score":    cvssScore,
 			"published":        result.Published,
 			"modified":         result.Modified,
 			"aliases":          result.Aliases,
 			"package":          result.Package,
 			"affected_version": result.PackageVersion,
 			"full_purl":        result.FullPurl,
+			"fixed_in":         fixedVersions,
 		})
 	}
 
@@ -966,9 +988,6 @@ func GetReleaseVulnerabilities(c *fiber.Ctx) error {
 	})
 }
 
-// GetAffectedReleasesBySeverity returns all releases affected by CVEs of a specific severity
-// OPTIMIZED: Uses pre-calculated CVSS scores stored during ingestion
-// CVEs without severity scores are defaulted to LOW (0.1)
 func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 	severity := c.Params("severity")
 
@@ -995,8 +1014,7 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 		})
 	}
 
-	// Convert to uppercase for database comparison
-	severityUpper := strings.ToUpper(severityLower)
+	severity_score := util.GetSeverityScore(severity)
 
 	ctx := context.Background()
 
@@ -1026,9 +1044,8 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 						LET cve = DOCUMENT(cveEdge._from)
 						FILTER cve != null
 						
-						// Filter by pre-calculated severity rating
-						LET severityRating = cve.database_specific.severity_rating
-						FILTER severityRating == @severityRating
+						// Filter by pre-calculated severity score
+						FILTER cve.database_specific.cvss_base_score >= @severityScore
 						
 						// Get the affected data that matches this PURL
 						FILTER cve.affected != null
@@ -1046,7 +1063,7 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 								cve_summary: cve.summary,
 								cve_details: cve.details,
 								cve_severity_score: cve.database_specific.cvss_base_score,
-								cve_severity_rating: severityRating,
+								cve_severity_rating: cve.database_specific.severity_rating,
 								cve_published: cve.published,
 								cve_modified: cve.modified,
 								cve_aliases: cve.aliases,
@@ -1063,7 +1080,7 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 
 	cursor, err := db.Database.Query(ctx, combinedQuery, &arangodb.QueryOptions{
 		BindVars: map[string]interface{}{
-			"severityRating": severityUpper,
+			"severityScore": severity_score,
 		},
 	})
 	if err != nil {
@@ -1093,7 +1110,24 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 		ProjectType       string          `json:"project_type"`
 	}
 
-	var affectedReleases []model.AffectedRelease
+	// Helper function to extract fixed versions from affected data
+	extractFixedVersions := func(affected models.Affected) []string {
+		var fixedVersions []string
+		seen := make(map[string]bool)
+
+		for _, vrange := range affected.Ranges {
+			for _, event := range vrange.Events {
+				if event.Fixed != "" && !seen[event.Fixed] {
+					fixedVersions = append(fixedVersions, event.Fixed)
+					seen[event.Fixed] = true
+				}
+			}
+		}
+
+		return fixedVersions
+	}
+
+	var affectedReleases []map[string]interface{}
 	seen := make(map[string]bool)
 	candidateCount := 0
 
@@ -1118,21 +1152,26 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 		}
 		seen[key] = true
 
-		affectedReleases = append(affectedReleases, model.AffectedRelease{
-			CveID:           candidate.CveID,
-			Summary:         candidate.CveSummary,
-			Details:         candidate.CveDetails,
-			Severity:        fmt.Sprintf("%.1f", candidate.CveSeverityScore),
-			Published:       candidate.CvePublished,
-			Modified:        candidate.CveModified,
-			Aliases:         candidate.CveAliases,
-			Package:         candidate.Package,
-			AffectedVersion: candidate.Version,
-			FullPurl:        candidate.FullPurl,
-			ReleaseName:     candidate.ReleaseName,
-			ReleaseVersion:  candidate.ReleaseVersion,
-			ContentSha:      candidate.ContentSha,
-			ProjectType:     candidate.ProjectType,
+		// Extract fixed versions
+		fixedVersions := extractFixedVersions(candidate.AffectedData)
+
+		affectedReleases = append(affectedReleases, map[string]interface{}{
+			"cve_id":           candidate.CveID,
+			"summary":          candidate.CveSummary,
+			"details":          candidate.CveDetails,
+			"severity_score":   candidate.CveSeverityScore,
+			"severity_rating":  candidate.CveSeverityRating,
+			"published":        candidate.CvePublished,
+			"modified":         candidate.CveModified,
+			"aliases":          candidate.CveAliases,
+			"package":          candidate.Package,
+			"affected_version": candidate.Version,
+			"full_purl":        candidate.FullPurl,
+			"fixed_in":         fixedVersions,
+			"release_name":     candidate.ReleaseName,
+			"release_version":  candidate.ReleaseVersion,
+			"content_sha":      candidate.ContentSha,
+			"project_type":     candidate.ProjectType,
 		})
 	}
 
@@ -1147,9 +1186,6 @@ func GetAffectedReleasesBySeverity(c *fiber.Ctx) error {
 	})
 }
 
-// GetEndpointsWithSeverity returns all endpoints affected by CVEs of a specific severity
-// OPTIMIZED: Uses pre-calculated CVSS scores stored during ingestion
-// CVEs without severity scores are defaulted to LOW (0.1)
 func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 	severity := c.Params("severity")
 
@@ -1176,8 +1212,7 @@ func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 		})
 	}
 
-	// Convert to uppercase for database comparison
-	severityUpper := strings.ToUpper(severityLower)
+	severity_score := util.GetSeverityScore(severity)
 
 	ctx := context.Background()
 
@@ -1207,9 +1242,8 @@ func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 						LET cve = DOCUMENT(cveEdge._from)
 						FILTER cve != null
 						
-						// Filter by pre-calculated severity rating
-						LET severityRating = cve.database_specific.severity_rating
-						FILTER severityRating == @severityRating
+						// Filter by pre-calculated severity score
+						FILTER cve.database_specific.cvss_base_score >= @severityScore
 						
 						// Get the affected data that matches this PURL
 						FILTER cve.affected != null
@@ -1236,7 +1270,7 @@ func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 										cve_summary: cve.summary,
 										cve_details: cve.details,
 										cve_severity_score: cve.database_specific.cvss_base_score,
-										cve_severity_rating: severityRating,
+										cve_severity_rating: cve.database_specific.severity_rating,
 										cve_published: cve.published,
 										cve_modified: cve.modified,
 										cve_aliases: cve.aliases,
@@ -1257,7 +1291,7 @@ func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 
 	cursor, err := db.Database.Query(ctx, combinedQuery, &arangodb.QueryOptions{
 		BindVars: map[string]interface{}{
-			"severityRating": severityUpper,
+			"severityScore": severity_score,
 		},
 	})
 	if err != nil {
@@ -1291,7 +1325,24 @@ func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 		SyncedAt          time.Time       `json:"synced_at"`
 	}
 
-	var affectedEndpoints []model.AffectedEndpoint
+	// Helper function to extract fixed versions from affected data
+	extractFixedVersions := func(affected models.Affected) []string {
+		var fixedVersions []string
+		seen := make(map[string]bool)
+
+		for _, vrange := range affected.Ranges {
+			for _, event := range vrange.Events {
+				if event.Fixed != "" && !seen[event.Fixed] {
+					fixedVersions = append(fixedVersions, event.Fixed)
+					seen[event.Fixed] = true
+				}
+			}
+		}
+
+		return fixedVersions
+	}
+
+	var affectedEndpoints []map[string]interface{}
 	seen := make(map[string]bool)
 	candidateCount := 0
 
@@ -1316,25 +1367,30 @@ func GetEndpointsWithSeverity(c *fiber.Ctx) error {
 		}
 		seen[key] = true
 
-		affectedEndpoints = append(affectedEndpoints, model.AffectedEndpoint{
-			CveID:           candidate.CveID,
-			Summary:         candidate.CveSummary,
-			Details:         candidate.CveDetails,
-			Severity:        fmt.Sprintf("%.1f", candidate.CveSeverityScore),
-			Published:       candidate.CvePublished,
-			Modified:        candidate.CveModified,
-			Aliases:         candidate.CveAliases,
-			Package:         candidate.Package,
-			AffectedVersion: candidate.Version,
-			FullPurl:        candidate.FullPurl,
-			ReleaseName:     candidate.ReleaseName,
-			ReleaseVersion:  candidate.ReleaseVersion,
-			ContentSha:      candidate.ContentSha,
-			ProjectType:     candidate.ProjectType,
-			EndpointName:    candidate.EndpointName,
-			EndpointType:    candidate.EndpointType,
-			Environment:     candidate.Environment,
-			SyncedAt:        candidate.SyncedAt,
+		// Extract fixed versions
+		fixedVersions := extractFixedVersions(candidate.AffectedData)
+
+		affectedEndpoints = append(affectedEndpoints, map[string]interface{}{
+			"cve_id":           candidate.CveID,
+			"summary":          candidate.CveSummary,
+			"details":          candidate.CveDetails,
+			"severity_score":   candidate.CveSeverityScore,
+			"severity_rating":  candidate.CveSeverityRating,
+			"published":        candidate.CvePublished,
+			"modified":         candidate.CveModified,
+			"aliases":          candidate.CveAliases,
+			"package":          candidate.Package,
+			"affected_version": candidate.Version,
+			"full_purl":        candidate.FullPurl,
+			"fixed_in":         fixedVersions,
+			"release_name":     candidate.ReleaseName,
+			"release_version":  candidate.ReleaseVersion,
+			"content_sha":      candidate.ContentSha,
+			"project_type":     candidate.ProjectType,
+			"endpoint_name":    candidate.EndpointName,
+			"endpoint_type":    candidate.EndpointType,
+			"environment":      candidate.Environment,
+			"synced_at":        candidate.SyncedAt,
 		})
 	}
 
@@ -1397,664 +1453,6 @@ func ListReleases(c *fiber.Ctx) error {
 	})
 }
 
-// Add this diagnostic endpoint to check how SBOMs are being processed
-
-func DiagnoseSBOMPURLs(c *fiber.Ctx) error {
-	name := c.Params("name")
-	version := c.Params("version")
-
-	ctx := context.Background()
-
-	// Get the SBOM content
-	sbomQuery := `
-		FOR release IN release
-			FILTER release.name == @name AND release.version == @version
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				RETURN sbom.content
-	`
-
-	sbomCursor, err := db.Database.Query(ctx, sbomQuery, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"name":    name,
-			"version": version,
-		},
-	})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to query SBOM: " + err.Error(),
-		})
-	}
-	defer sbomCursor.Close()
-
-	var sbomContent json.RawMessage
-	if !sbomCursor.HasMore() {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "SBOM not found",
-		})
-	}
-	sbomCursor.ReadDocument(ctx, &sbomContent)
-
-	// Parse SBOM to see what PURLs look like
-	var sbomData struct {
-		Components []struct {
-			Name string `json:"name"`
-			Purl string `json:"purl"`
-		} `json:"components"`
-	}
-
-	if err := json.Unmarshal(sbomContent, &sbomData); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to parse SBOM: " + err.Error(),
-		})
-	}
-
-	// Sample first 5 components
-	samples := []map[string]interface{}{}
-	for i, comp := range sbomData.Components {
-		if i >= 5 {
-			break
-		}
-
-		// Try to parse and get base PURL
-		cleaned, _ := util.CleanPURL(comp.Purl)
-		basePurl, _ := util.GetBasePURL(comp.Purl)
-		parsed, _ := util.ParsePURL(comp.Purl)
-
-		sample := map[string]interface{}{
-			"component_name": comp.Name,
-			"original_purl":  comp.Purl,
-			"cleaned_purl":   cleaned,
-			"base_purl":      basePurl,
-		}
-
-		if parsed != nil {
-			sample["parsed_type"] = parsed.Type
-			sample["parsed_namespace"] = parsed.Namespace
-			sample["parsed_name"] = parsed.Name
-			sample["parsed_version"] = parsed.Version
-		}
-
-		samples = append(samples, sample)
-	}
-
-	// Check what's actually stored in the PURL collection
-	storedPurlsQuery := `
-		FOR release IN release
-			FILTER release.name == @name AND release.version == @version
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
-					LIMIT 5
-					LET purl = DOCUMENT(sbomEdge._to)
-					RETURN {
-						purl_stored: purl.purl,
-						version_stored: sbomEdge.version,
-						full_purl_stored: sbomEdge.full_purl
-					}
-	`
-
-	storedCursor, _ := db.Database.Query(ctx, storedPurlsQuery, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"name":    name,
-			"version": version,
-		},
-	})
-	defer storedCursor.Close()
-
-	var storedPurls []map[string]interface{}
-	for storedCursor.HasMore() {
-		var stored map[string]interface{}
-		storedCursor.ReadDocument(ctx, &stored)
-		storedPurls = append(storedPurls, stored)
-	}
-
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"sbom_component_samples": samples,
-		"stored_purls_in_db":     storedPurls,
-		"issue":                  "Compare 'base_purl' from SBOM with 'purl_stored' in DB - they should match!",
-	})
-}
-
-// Add this function before the main() function in main.go
-
-func DebugReleaseVulnerabilities(c *fiber.Ctx) error {
-	name := c.Params("name")
-	version := c.Params("version")
-
-	if name == "" || version == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"success": false,
-			"message": "Release name and version are required",
-		})
-	}
-
-	ctx := context.Background()
-	debug := make(map[string]interface{})
-
-	// Step 1: Verify release exists
-	releaseQuery := `
-		FOR release IN release
-			FILTER release.name == @name AND release.version == @version
-			RETURN release
-	`
-	releaseCursor, err := db.Database.Query(ctx, releaseQuery, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"name":    name,
-			"version": version,
-		},
-	})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to query release: " + err.Error(),
-		})
-	}
-	defer releaseCursor.Close()
-
-	if !releaseCursor.HasMore() {
-		return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
-			"error": "Release not found",
-		})
-	}
-
-	var release model.ProjectRelease
-	releaseCursor.ReadDocument(ctx, &release)
-	debug["release_found"] = true
-	debug["release_key"] = release.Key
-
-	// Step 2: Get packages from SBOM
-	packagesQuery := `
-		FOR release IN release
-			FILTER release.name == @name AND release.version == @version
-			
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
-					
-					LET purl = DOCUMENT(sbomEdge._to)
-					
-					RETURN {
-						package: purl.purl,
-						version: sbomEdge.version,
-						full_purl: sbomEdge.full_purl
-					}
-	`
-
-	packagesCursor, err := db.Database.Query(ctx, packagesQuery, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"name":    name,
-			"version": version,
-		},
-	})
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to query packages: " + err.Error(),
-		})
-	}
-	defer packagesCursor.Close()
-
-	type PackageVersion struct {
-		Package  string `json:"package"`
-		Version  string `json:"version"`
-		FullPurl string `json:"full_purl"`
-	}
-
-	var packages []PackageVersion
-	for packagesCursor.HasMore() {
-		var pkg PackageVersion
-		packagesCursor.ReadDocument(ctx, &pkg)
-		packages = append(packages, pkg)
-	}
-
-	debug["package_count"] = len(packages)
-	debug["packages_sample"] = packages[:min(10, len(packages))] // First 10
-
-	// Step 3: Get total CVE count
-	cveCountQuery := `RETURN LENGTH(cve)`
-	cveCountCursor, _ := db.Database.Query(ctx, cveCountQuery, nil)
-	var cveCount int
-	if cveCountCursor.HasMore() {
-		cveCountCursor.ReadDocument(ctx, &cveCount)
-	}
-	cveCountCursor.Close()
-	debug["total_cve_count"] = cveCount
-
-	// Step 4: Sample CVE check - get first 5 CVEs
-	sampleCVEQuery := `
-		FOR cve IN cve
-			LIMIT 5
-			RETURN {
-				id: cve.id,
-				summary: cve.summary,
-				affected_count: LENGTH(cve.affected)
-			}
-	`
-	sampleCursor, _ := db.Database.Query(ctx, sampleCVEQuery, nil)
-	defer sampleCursor.Close()
-
-	var sampleCVEs []interface{}
-	for sampleCursor.HasMore() {
-		var cve interface{}
-		sampleCursor.ReadDocument(ctx, &cve)
-		sampleCVEs = append(sampleCVEs, cve)
-	}
-	debug["sample_cves"] = sampleCVEs
-
-	// Step 5: Try to find CVEs that match first package using database query (EFFICIENT)
-	if len(packages) > 0 {
-		firstPkg := packages[0]
-		debug["first_package"] = firstPkg
-
-		// Use a database query to find matching CVEs efficiently
-		matchQuery := `
-			FOR cve IN cve
-				FOR affected IN cve.affected
-					FILTER affected.package.purl == @package OR
-					       CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name) == @package
-					LIMIT 10
-					RETURN {
-						cve_id: cve.id,
-						cve_summary: cve.summary,
-						package_purl: affected.package.purl,
-						package_ecosystem: affected.package.ecosystem,
-						package_name: affected.package.name,
-						ranges: affected.ranges,
-						versions: affected.versions
-					}
-		`
-
-		matchCursor, err := db.Database.Query(ctx, matchQuery, &arangodb.QueryOptions{
-			BindVars: map[string]interface{}{
-				"package": firstPkg.Package,
-			},
-		})
-		if err != nil {
-			debug["match_query_error"] = err.Error()
-		} else {
-			defer matchCursor.Close()
-
-			var matches []interface{}
-			for matchCursor.HasMore() {
-				var match interface{}
-				matchCursor.ReadDocument(ctx, &match)
-				matches = append(matches, match)
-			}
-			debug["first_package_potential_matches"] = matches
-			debug["first_package_match_count"] = len(matches)
-		}
-	}
-
-	// Step 6: Check SBOM structure
-	sbomStructureQuery := `
-		FOR release IN release
-			FILTER release.name == @name AND release.version == @version
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				RETURN {
-					sbom_key: sbom._key,
-					sbom_contentsha: sbom.contentsha,
-					has_content: sbom.content != null,
-					component_count: LENGTH(JSON_PARSE(sbom.content).components)
-				}
-	`
-	sbomStructCursor, _ := db.Database.Query(ctx, sbomStructureQuery, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"name":    name,
-			"version": version,
-		},
-	})
-	if sbomStructCursor.HasMore() {
-		var sbomInfo interface{}
-		sbomStructCursor.ReadDocument(ctx, &sbomInfo)
-		debug["sbom_info"] = sbomInfo
-	}
-	sbomStructCursor.Close()
-
-	return c.Status(fiber.StatusOK).JSON(debug)
-}
-
-func min(a, b int) int {
-	if a < b {
-		return a
-	}
-	return b
-}
-
-// Add this diagnostic endpoint to check if the graph is complete
-
-func DiagnoseGraphCompleteness(c *fiber.Ctx) error {
-	ctx := context.Background()
-
-	// Check all collections and edge collections
-	checks := map[string]string{
-		"releases":     "RETURN LENGTH(release)",
-		"sboms":        "RETURN LENGTH(sbom)",
-		"purls":        "RETURN LENGTH(purl)",
-		"cves":         "RETURN LENGTH(cve)",
-		"endpoints":    "RETURN LENGTH(endpoint)",
-		"syncs":        "RETURN LENGTH(sync)",
-		"release2sbom": "RETURN LENGTH(release2sbom)",
-		"sbom2purl":    "RETURN LENGTH(sbom2purl)",
-		"cve2purl":     "RETURN LENGTH(cve2purl)",
-	}
-
-	results := make(map[string]interface{})
-
-	for name, query := range checks {
-		cursor, err := db.Database.Query(ctx, query, nil)
-		if err != nil {
-			results[name] = "ERROR: " + err.Error()
-			continue
-		}
-
-		var count int
-		if cursor.HasMore() {
-			cursor.ReadDocument(ctx, &count)
-		}
-		cursor.Close()
-		results[name] = count
-	}
-
-	// Check if we have any CVEs with severity info
-	severityQuery := `
-		FOR cve IN cve
-			FILTER LENGTH(cve.severity) > 0
-			LIMIT 1
-			RETURN cve.id
-	`
-
-	severityCursor, _ := db.Database.Query(ctx, severityQuery, nil)
-	hasCVEsWithSeverity := severityCursor.HasMore()
-	var sampleCVEWithSeverity string
-	if hasCVEsWithSeverity {
-		severityCursor.ReadDocument(ctx, &sampleCVEWithSeverity)
-	}
-	severityCursor.Close()
-
-	results["has_cves_with_severity"] = hasCVEsWithSeverity
-	results["sample_cve_with_severity"] = sampleCVEWithSeverity
-
-	// Check if any release has a path to CVEs via the graph
-	pathQuery := `
-		FOR release IN release
-			LIMIT 1
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
-					LIMIT 1
-					LET purl = DOCUMENT(sbomEdge._to)
-					LET cveCount = LENGTH(
-						FOR cve IN 1..1 INBOUND purl cve2purl
-							LIMIT 1
-							RETURN cve
-					)
-					RETURN {
-						has_release: true,
-						has_sbom: true,
-						has_purl: true,
-						has_cve_connection: cveCount > 0,
-						purl_example: purl.purl
-					}
-	`
-
-	pathCursor, _ := db.Database.Query(ctx, pathQuery, nil)
-	var pathInfo map[string]interface{}
-	if pathCursor.HasMore() {
-		pathCursor.ReadDocument(ctx, &pathInfo)
-	}
-	pathCursor.Close()
-
-	results["graph_path_check"] = pathInfo
-
-	// Determine what's missing
-	var issues []string
-	if results["cve2purl"].(int) == 0 {
-		issues = append(issues, "CRITICAL: No cve2purl edges! You need to reload CVEs with the fixed PURL construction code.")
-	}
-	if results["sbom2purl"].(int) == 0 {
-		issues = append(issues, "CRITICAL: No sbom2purl edges! You need to upload SBOMs.")
-	}
-	if results["release2sbom"].(int) == 0 {
-		issues = append(issues, "CRITICAL: No release2sbom edges! You need to upload releases with SBOMs.")
-	}
-	if !hasCVEsWithSeverity {
-		issues = append(issues, "WARNING: No CVEs have severity information.")
-	}
-
-	if len(issues) == 0 {
-		issues = append(issues, "Graph appears complete! If queries still fail, check query syntax.")
-	}
-
-	results["issues"] = issues
-
-	return c.Status(fiber.StatusOK).JSON(results)
-}
-
-// DiagnoseInboundTraversal - Debug endpoint to find what's causing INBOUND traversal to fail
-func DiagnoseInboundTraversal(c *fiber.Ctx) error {
-	ctx := context.Background()
-	debug := make(map[string]interface{})
-
-	// Step 1: Check if cve2purl edge collection exists and has data
-	cve2purlCountQuery := `RETURN LENGTH(cve2purl)`
-	cursor, _ := db.Database.Query(ctx, cve2purlCountQuery, nil)
-	if cursor.HasMore() {
-		var count int
-		cursor.ReadDocument(ctx, &count)
-		debug["cve2purl_edge_count"] = count
-	}
-	cursor.Close()
-
-	// Step 2: Sample some cve2purl edges
-	sampleEdgesQuery := `
-		FOR edge IN cve2purl
-			LIMIT 5
-			RETURN {
-				from: edge._from,
-				to: edge._to,
-				from_exists: DOCUMENT(edge._from) != null,
-				to_exists: DOCUMENT(edge._to) != null
-			}
-	`
-	cursor, _ = db.Database.Query(ctx, sampleEdgesQuery, nil)
-	var sampleEdges []interface{}
-	for cursor.HasMore() {
-		var edge interface{}
-		cursor.ReadDocument(ctx, &edge)
-		sampleEdges = append(sampleEdges, edge)
-	}
-	cursor.Close()
-	debug["sample_cve2purl_edges"] = sampleEdges
-
-	// Step 3: Get a sample release and its PURLs
-	releasePurlQuery := `
-		FOR release IN release
-			LIMIT 1
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
-					LIMIT 3
-					LET purl = DOCUMENT(sbomEdge._to)
-					RETURN {
-						release_name: release.name,
-						release_version: release.version,
-						purl_id: purl._id,
-						purl_key: purl._key,
-						purl_value: purl.purl,
-						sbom_edge_from: sbomEdge._from,
-						sbom_edge_to: sbomEdge._to
-					}
-	`
-	cursor, _ = db.Database.Query(ctx, releasePurlQuery, nil)
-	var releasePurls []interface{}
-	for cursor.HasMore() {
-		var rp interface{}
-		cursor.ReadDocument(ctx, &rp)
-		releasePurls = append(releasePurls, rp)
-	}
-	cursor.Close()
-	debug["sample_release_purls"] = releasePurls
-
-	// Step 4: Try the INBOUND traversal on a specific PURL
-	if len(releasePurls) > 0 {
-		// Extract purl_id from first sample
-		firstPurl := releasePurls[0].(map[string]interface{})
-		purlID := firstPurl["purl_id"].(string)
-
-		// Try INBOUND traversal
-		inboundTestQuery := `
-			LET purl = DOCUMENT(@purlId)
-			RETURN {
-				purl_id: purl._id,
-				purl_value: purl.purl,
-				inbound_test: (
-					FOR cve IN 1..1 INBOUND purl cve2purl
-						LIMIT 3
-						RETURN {
-							cve_id: cve.id,
-							cve_key: cve._key
-						}
-				)
-			}
-		`
-		cursor, err := db.Database.Query(ctx, inboundTestQuery, &arangodb.QueryOptions{
-			BindVars: map[string]interface{}{
-				"purlId": purlID,
-			},
-		})
-		if err != nil {
-			debug["inbound_traversal_error"] = err.Error()
-		} else {
-			var result interface{}
-			if cursor.HasMore() {
-				cursor.ReadDocument(ctx, &result)
-				debug["inbound_traversal_test"] = result
-			}
-			cursor.Close()
-		}
-
-		// Try the alternative approach (FOR edge IN collection)
-		alternativeQuery := `
-			LET purl = DOCUMENT(@purlId)
-			RETURN {
-				purl_id: purl._id,
-				purl_value: purl.purl,
-				alternative_test: (
-					FOR cveEdge IN cve2purl
-						FILTER cveEdge._to == purl._id
-						LIMIT 3
-						LET cve = DOCUMENT(cveEdge._from)
-						RETURN {
-							cve_id: cve.id,
-							cve_key: cve._key,
-							edge_from: cveEdge._from,
-							edge_to: cveEdge._to
-						}
-				)
-			}
-		`
-		cursor, err = db.Database.Query(ctx, alternativeQuery, &arangodb.QueryOptions{
-			BindVars: map[string]interface{}{
-				"purlId": purlID,
-			},
-		})
-		if err != nil {
-			debug["alternative_approach_error"] = err.Error()
-		} else {
-			var result interface{}
-			if cursor.HasMore() {
-				cursor.ReadDocument(ctx, &result)
-				debug["alternative_approach_test"] = result
-			}
-			cursor.Close()
-		}
-	}
-
-	// Step 5: Check if there are any NULL values in the graph
-	nullCheckQuery := `
-		FOR release IN release
-			LIMIT 5
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
-					LET purl = DOCUMENT(sbomEdge._to)
-					RETURN {
-						release_name: release.name,
-						sbom_id: sbom._id,
-						purl_id: purl._id,
-						purl_is_null: purl == null,
-						sbom_edge_to: sbomEdge._to,
-						purl_document_lookup: DOCUMENT(sbomEdge._to) != null
-					}
-	`
-	cursor, _ = db.Database.Query(ctx, nullCheckQuery, nil)
-	var nullChecks []interface{}
-	for cursor.HasMore() {
-		var nc interface{}
-		cursor.ReadDocument(ctx, &nc)
-		nullChecks = append(nullChecks, nc)
-	}
-	cursor.Close()
-	debug["null_checks"] = nullChecks
-
-	// Step 6: Try the full problematic query on a small subset
-	problemQueryTest := `
-		FOR release IN release
-			LIMIT 1
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
-					LET purl = DOCUMENT(sbomEdge._to)
-					LET packageVersion = sbomEdge.version
-					RETURN {
-						release: release.name,
-						purl_id: purl._id,
-						purl_value: purl.purl,
-						purl_type: TYPENAME(purl),
-						inbound_result_type: TYPENAME(
-							FOR cve IN 1..1 INBOUND purl cve2purl
-								LIMIT 1
-								RETURN cve
-						)
-					}
-	`
-	cursor, err := db.Database.Query(ctx, problemQueryTest, nil)
-	if err != nil {
-		debug["problem_query_test_error"] = err.Error()
-	} else {
-		var results []interface{}
-		for cursor.HasMore() {
-			var result interface{}
-			cursor.ReadDocument(ctx, &result)
-			results = append(results, result)
-		}
-		debug["problem_query_test_results"] = results
-		cursor.Close()
-	}
-
-	// Step 7: Check the actual structure of purl documents
-	purlStructureQuery := `
-		FOR purl IN purl
-			LIMIT 3
-			RETURN {
-				id: purl._id,
-				key: purl._key,
-				purl: purl.purl,
-				objtype: purl.objtype,
-				all_fields: ATTRIBUTES(purl)
-			}
-	`
-	cursor, _ = db.Database.Query(ctx, purlStructureQuery, nil)
-	var purlStructures []interface{}
-	for cursor.HasMore() {
-		var ps interface{}
-		cursor.ReadDocument(ctx, &ps)
-		purlStructures = append(purlStructures, ps)
-	}
-	cursor.Close()
-	debug["purl_document_structures"] = purlStructures
-
-	return c.Status(fiber.StatusOK).JSON(debug)
-}
-
 // ============================================================================
 // Main
 // ============================================================================
@@ -2097,11 +1495,6 @@ func main() {
 
 	// LIST endpoints
 	api.Get("/releases", ListReleases)
-
-	// DEBUG
-	api.Get("/releases/:name/:version/diagnose-sbom-purls", DiagnoseSBOMPURLs)
-	api.Get("/releases/:name/:version/vulnerabilities/debug", DebugReleaseVulnerabilities)
-	api.Get("/debug/inbound-traversal", DiagnoseInboundTraversal)
 
 	// Get port from environment or default to 3000
 	port := os.Getenv("PORT")

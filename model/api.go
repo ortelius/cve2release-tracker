@@ -21,6 +21,7 @@ type AffectedRelease struct {
 	Summary         string   `json:"summary"`
 	Details         string   `json:"details"`
 	Severity        string   `json:"severity"`
+	SeverityRating  string   `json:"severity_rating"`
 	Published       string   `json:"published"`
 	Modified        string   `json:"modified"`
 	Aliases         []string `json:"aliases"`

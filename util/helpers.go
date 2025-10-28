@@ -8,6 +8,8 @@ import (
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
+	npm "github.com/aquasecurity/go-npm-version/pkg"
+	pep440 "github.com/aquasecurity/go-pep440-version"
 	"github.com/google/osv-scanner/pkg/models"
 	"github.com/package-url/packageurl-go"
 	"gopkg.in/yaml.v2"
@@ -224,6 +226,7 @@ func EcosystemToPurlType(ecosystem string) string {
 }
 
 // IsVersionAffected checks if a version is affected by OSV ranges
+// Uses ecosystem-specific version parsers for accurate comparison
 func IsVersionAffected(version string, affected models.Affected) bool {
 	// Check specific versions list
 	if len(affected.Versions) > 0 {
@@ -242,7 +245,13 @@ func IsVersionAffected(version string, affected models.Affected) bool {
 				continue
 			}
 
-			if isVersionInRange(version, vrange) {
+			// Determine ecosystem from package information if available
+			ecosystem := ""
+			if affected.Package.Ecosystem != "" {
+				ecosystem = string(affected.Package.Ecosystem)
+			}
+
+			if isVersionInRange(version, vrange, ecosystem) {
 				return true
 			}
 		}
@@ -252,7 +261,17 @@ func IsVersionAffected(version string, affected models.Affected) bool {
 }
 
 // isVersionInRange checks if a version falls within an OSV range
-func isVersionInRange(version string, vrange models.Range) bool {
+// Uses ecosystem-specific parsers for npm and PyPI
+func isVersionInRange(version string, vrange models.Range, ecosystem string) bool {
+	// Try ecosystem-specific parsers first
+	switch strings.ToLower(ecosystem) {
+	case "npm":
+		return isVersionInRangeNPM(version, vrange)
+	case "pypi":
+		return isVersionInRangePython(version, vrange)
+	}
+
+	// Fall back to semver parsing with coercion (handles Maven and others)
 	v, err := semver.NewVersion(version)
 	if err != nil {
 		// If not valid semver, fall back to string comparison
@@ -292,6 +311,114 @@ func isVersionInRange(version string, vrange models.Range) bool {
 	return introduced != nil || fixed != nil || lastAffected != nil
 }
 
+// isVersionInRangeNPM uses npm-specific version comparison
+func isVersionInRangeNPM(version string, vrange models.Range) bool {
+	v, err := npm.NewVersion(version)
+	if err != nil {
+		// Fall back to string comparison
+		return isVersionInRangeString(version, vrange)
+	}
+
+	var introduced, fixed, lastAffected npm.Version
+
+	hasIntroduced := false
+	hasFixed := false
+	hasLastAffected := false
+
+	for _, event := range vrange.Events {
+		if event.Introduced != "" {
+			if intro, err := npm.NewVersion(event.Introduced); err == nil {
+				introduced = intro
+				hasIntroduced = true
+			}
+		}
+		if event.Fixed != "" {
+			if fix, err := npm.NewVersion(event.Fixed); err == nil {
+				fixed = fix
+				hasFixed = true
+			}
+		}
+		if event.LastAffected != "" {
+			if last, err := npm.NewVersion(event.LastAffected); err == nil {
+				lastAffected = last
+				hasLastAffected = true
+			}
+		}
+	}
+
+	// Check if version is >= introduced
+	if hasIntroduced && v.LessThan(introduced) {
+		return false
+	}
+
+	// Check if version is < fixed
+	if hasFixed && !v.LessThan(fixed) {
+		return false
+	}
+
+	// Check if version is <= last_affected
+	if hasLastAffected && v.GreaterThan(lastAffected) {
+		return false
+	}
+
+	// If we get here and there's an introduced/fixed/last_affected, it's affected
+	return hasIntroduced || hasFixed || hasLastAffected
+}
+
+// isVersionInRangePython uses PEP 440 version comparison for Python packages
+func isVersionInRangePython(version string, vrange models.Range) bool {
+	v, err := pep440.Parse(version)
+	if err != nil {
+		// Fall back to string comparison
+		return isVersionInRangeString(version, vrange)
+	}
+
+	var introduced, fixed, lastAffected pep440.Version
+
+	hasIntroduced := false
+	hasFixed := false
+	hasLastAffected := false
+
+	for _, event := range vrange.Events {
+		if event.Introduced != "" {
+			if intro, err := pep440.Parse(event.Introduced); err == nil {
+				introduced = intro
+				hasIntroduced = true
+			}
+		}
+		if event.Fixed != "" {
+			if fix, err := pep440.Parse(event.Fixed); err == nil {
+				fixed = fix
+				hasFixed = true
+			}
+		}
+		if event.LastAffected != "" {
+			if last, err := pep440.Parse(event.LastAffected); err == nil {
+				lastAffected = last
+				hasLastAffected = true
+			}
+		}
+	}
+
+	// Check if version is >= introduced
+	if hasIntroduced && v.LessThan(introduced) {
+		return false
+	}
+
+	// Check if version is < fixed
+	if hasFixed && !v.LessThan(fixed) {
+		return false
+	}
+
+	// Check if version is <= last_affected
+	if hasLastAffected && v.GreaterThan(lastAffected) {
+		return false
+	}
+
+	// If we get here and there's an introduced/fixed/last_affected, it's affected
+	return hasIntroduced || hasFixed || hasLastAffected
+}
+
 // isVersionInRangeString performs string-based comparison as fallback
 func isVersionInRangeString(version string, vrange models.Range) bool {
 	for _, event := range vrange.Events {
@@ -313,4 +440,22 @@ func isVersionInRangeString(version string, vrange models.Range) bool {
 		}
 	}
 	return true
+}
+
+// getSeverityScore returns the lowest CVSS base score for a given severity rating.
+func GetSeverityScore(severity string) float64 {
+	switch strings.ToUpper(strings.TrimSpace(severity)) {
+	case "NONE":
+		return 0.0
+	case "LOW":
+		return 0.1
+	case "MEDIUM":
+		return 4.0
+	case "HIGH":
+		return 7.0
+	case "CRITICAL":
+		return 9.0
+	default:
+		return 0.0 // unknown severity defaults to 0.0
+	}
 }
