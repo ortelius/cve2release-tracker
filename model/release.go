@@ -3,8 +3,6 @@ package model
 
 import (
 	"time"
-
-	scorecard "github.com/ossf/scorecard/v5/pkg/scorecard"
 )
 
 // ProjectRelease defines a Version of an Component for a List View
@@ -47,9 +45,47 @@ type ProjectRelease struct {
 	GitVerifyCommit          bool      `json:"gitverifycommit,omitempty"`
 
 	// OpenSSF Scorecard Results (https://github.com/ossf/scorecard)
-	// Import: github.com/ossf/scorecard/v5/pkg/scorecard
-	OpenSSFScorecardScore float64           `json:"openssf_scorecard_score,omitempty"` // Aggregate score 0-10
-	ScorecardResult       *scorecard.Result `json:"scorecard_result,omitempty"`        // Complete result with all checks
+	// Uses custom ScorecardAPIResponse struct that matches the API response format
+	OpenSSFScorecardScore float64                `json:"openssf_scorecard_score,omitempty"` // Aggregate score 0-10
+	ScorecardResult       *ScorecardAPIResponse  `json:"scorecard_result,omitempty"`        // Complete result with all checks
+}
+
+// ScorecardAPIResponse represents the OpenSSF Scorecard API response
+// This matches the structure returned by https://api.securityscorecards.dev/
+type ScorecardAPIResponse struct {
+	Date      string   `json:"date"`
+	Repo      Repo     `json:"repo"`
+	Scorecard Scores   `json:"scorecard"`
+	Score     float64  `json:"score"`
+	Checks    []Check  `json:"checks"`
+	Metadata  []string `json:"metadata,omitempty"`
+}
+
+// Repo contains repository information
+type Repo struct {
+	Name   string `json:"name"`
+	Commit string `json:"commit"`
+}
+
+// Scores contains scorecard version information
+type Scores struct {
+	Version string `json:"version"`
+	Commit  string `json:"commit"`
+}
+
+// Check represents a single security check result
+type Check struct {
+	Name          string        `json:"name"`
+	Score         int           `json:"score"`
+	Reason        string        `json:"reason"`
+	Details       []string      `json:"details,omitempty"`
+	Documentation Documentation `json:"documentation"`
+}
+
+// Documentation provides information about a check
+type Documentation struct {
+	Short string `json:"short"`
+	URL   string `json:"url"`
 }
 
 // NewProjectRelease is the contructor that sets the appropriate default values

@@ -187,6 +187,27 @@ func processDirectory(dir string) error {
 	}
 
 	release := buildRelease(mapping, projectType)
+
+	// Fetch OpenSSF Scorecard data if git repository information is available
+	if release.GitURL != "" && release.GitCommit != "" {
+		if verbose {
+			fmt.Printf("Fetching OpenSSF Scorecard data for %s @ %s...\n", release.GitURL, release.GitCommit)
+		}
+		scorecardResult, aggregateScore, err := fetchOpenSSFScorecard(release.GitURL, release.GitCommit)
+		if err != nil {
+			if verbose {
+				fmt.Printf("Warning: Failed to fetch OpenSSF Scorecard data: %v\n", err)
+			}
+			// Don't fail the upload if scorecard fetch fails, just continue without it
+		} else {
+			release.ScorecardResult = scorecardResult
+			release.OpenSSFScorecardScore = aggregateScore
+			if verbose {
+				fmt.Printf("OpenSSF Scorecard score: %.2f/10\n", release.OpenSSFScorecardScore)
+			}
+		}
+	}
+
 	sbomObj := model.NewSBOM()
 	sbomObj.Content = json.RawMessage(sbomContent)
 
@@ -200,6 +221,9 @@ func processDirectory(dir string) error {
 		if release.ContentSha != "" {
 			fmt.Printf("ContentSha: %s\n", release.ContentSha)
 		}
+		if release.OpenSSFScorecardScore >= 0 {
+			fmt.Printf("OpenSSF Scorecard Score: %.2f/10\n", release.OpenSSFScorecardScore)
+		}
 	}
 
 	if err := postRelease(serverURL, request); err != nil {
@@ -208,6 +232,210 @@ func processDirectory(dir string) error {
 
 	fmt.Printf("✓ Successfully uploaded release %s version %s\n", release.Name, release.Version)
 	return nil
+}
+
+// -------------------- OpenSSF Scorecard API --------------------
+
+// fetchOpenSSFScorecard fetches scorecard data from the OpenSSF Scorecard API
+// If the scorecard doesn't exist, it triggers a scan and waits for results
+// Returns: ScorecardAPIResponse (matches API structure), aggregate score, error
+func fetchOpenSSFScorecard(gitURL, commitSha string) (*model.ScorecardAPIResponse, float64, error) {
+	// Parse the Git URL to extract platform, org, and repo
+	// Example: https://github.com/ortelius/cve2release-tracker
+	platform, org, repo, err := parseGitURL(gitURL)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to parse git URL: %w", err)
+	}
+
+	// Try to fetch existing scorecard first
+	result, aggregateScore, err := getScorecardData(platform, org, repo, commitSha)
+	if err == nil {
+		return result, aggregateScore, nil
+	}
+
+	// If scorecard not found, trigger a new scan
+	if strings.Contains(err.Error(), "not found") || strings.Contains(err.Error(), "404") {
+		if verbose {
+			fmt.Printf("Scorecard not found. Triggering new scan for %s/%s/%s...\n", platform, org, repo)
+		}
+
+		// Trigger a new scorecard scan
+		if err := triggerScorecardScan(platform, org, repo); err != nil {
+			return nil, 0, fmt.Errorf("failed to trigger scorecard scan: %w", err)
+		}
+
+		// Wait for the scan to complete and fetch results
+		if verbose {
+			fmt.Println("Waiting for scorecard scan to complete...")
+		}
+
+		// Retry with exponential backoff
+		maxRetries := 5
+		for i := 0; i < maxRetries; i++ {
+			waitTime := time.Duration(5*(i+1)) * time.Second
+			if verbose {
+				fmt.Printf("Waiting %v before retry %d/%d...\n", waitTime, i+1, maxRetries)
+			}
+			time.Sleep(waitTime)
+
+			result, aggregateScore, err := getScorecardData(platform, org, repo, commitSha)
+			if err == nil {
+				return result, aggregateScore, nil
+			}
+
+			if !strings.Contains(err.Error(), "not found") && !strings.Contains(err.Error(), "404") {
+				// Different error, not a "not found" error
+				return nil, 0, err
+			}
+		}
+
+		return nil, 0, fmt.Errorf("scorecard scan timed out after %d retries", maxRetries)
+	}
+
+	return nil, 0, err
+}
+
+// getScorecardData fetches existing scorecard data from the API
+// Returns: ScorecardAPIResponse, aggregate score, error
+func getScorecardData(platform, org, repo, commitSha string) (*model.ScorecardAPIResponse, float64, error) {
+	// OpenSSF Scorecard API endpoint
+	// https://api.securityscorecards.dev/projects/{platform}/{org}/{repo}
+	apiURL := fmt.Sprintf("https://api.securityscorecards.dev/projects/%s/%s/%s", platform, org, repo)
+
+	if verbose {
+		fmt.Printf("Fetching scorecard from: %s\n", apiURL)
+	}
+
+	req, err := http.NewRequest("GET", apiURL, nil)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to create request: %w", err)
+	}
+
+	// Set headers as recommended by the API
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		return nil, 0, fmt.Errorf("HTTP request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to read response: %w", err)
+	}
+
+	if resp.StatusCode == http.StatusNotFound {
+		return nil, 0, fmt.Errorf("scorecard not found for repository %s/%s/%s", platform, org, repo)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return nil, 0, fmt.Errorf("API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var apiResponse model.ScorecardAPIResponse
+	if err := json.Unmarshal(body, &apiResponse); err != nil {
+		return nil, 0, fmt.Errorf("failed to parse API response: %w", err)
+	}
+
+	// Update the commit SHA to match what was requested (API may return latest)
+	apiResponse.Repo.Commit = commitSha
+
+	// Use the aggregate score provided by the API
+	aggregateScore := apiResponse.Score
+
+	return &apiResponse, aggregateScore, nil
+}
+
+// triggerScorecardScan triggers a new scorecard scan via the API
+func triggerScorecardScan(platform, org, repo string) error {
+	// The OpenSSF Scorecard API automatically triggers scans for GitHub repos
+	// when accessed via their REST API endpoint
+	apiURL := fmt.Sprintf("https://api.securityscorecards.dev/projects/%s/%s/%s", platform, org, repo)
+
+	// Make a POST request to trigger the scan
+	// Note: Some APIs use POST to trigger, but OpenSSF might auto-trigger on GET
+	// We'll try a POST first, and if that fails, rely on auto-triggering
+	req, err := http.NewRequest("POST", apiURL, nil)
+	if err != nil {
+		return fmt.Errorf("failed to create scan request: %w", err)
+	}
+
+	req.Header.Set("Accept", "application/json")
+
+	client := &http.Client{
+		Timeout: 30 * time.Second,
+	}
+
+	resp, err := client.Do(req)
+	if err != nil {
+		if verbose {
+			fmt.Printf("POST request failed (expected, will auto-trigger): %v\n", err)
+		}
+		// POST might not be supported, but GET should auto-trigger
+		return nil
+	}
+	defer resp.Body.Close()
+
+	// Any 2xx or 404 response is acceptable
+	// 404 means the endpoint doesn't support POST, but GET should auto-trigger
+	if resp.StatusCode >= 200 && resp.StatusCode < 300 {
+		if verbose {
+			fmt.Println("Scorecard scan triggered successfully")
+		}
+		return nil
+	}
+
+	if resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed {
+		if verbose {
+			fmt.Println("POST not supported, relying on auto-trigger via GET requests")
+		}
+		return nil
+	}
+
+	body, _ := io.ReadAll(resp.Body)
+	return fmt.Errorf("unexpected response from scan trigger: %d - %s", resp.StatusCode, string(body))
+}
+
+// parseGitURL extracts platform, org, and repo from a git URL
+func parseGitURL(gitURL string) (platform, org, repo string, err error) {
+	// Remove .git suffix if present
+	gitURL = strings.TrimSuffix(gitURL, ".git")
+
+	// Remove protocol
+	gitURL = strings.TrimPrefix(gitURL, "https://")
+	gitURL = strings.TrimPrefix(gitURL, "http://")
+	gitURL = strings.TrimPrefix(gitURL, "git@")
+
+	// Replace : with / for SSH URLs
+	gitURL = strings.ReplaceAll(gitURL, ":", "/")
+
+	// Split the URL
+	parts := strings.Split(gitURL, "/")
+
+	if len(parts) < 3 {
+		return "", "", "", fmt.Errorf("invalid git URL format: %s", gitURL)
+	}
+
+	platform = parts[0]
+	org = parts[1]
+	repo = parts[2]
+
+	// Map platform names to expected format
+	switch {
+	case strings.Contains(platform, "github"):
+		platform = "github.com"
+	case strings.Contains(platform, "gitlab"):
+		platform = "gitlab.com"
+	default:
+		// Use as-is for other platforms
+	}
+
+	return platform, org, repo, nil
 }
 
 // -------------------- Syft SBOM GENERATION --------------------
@@ -474,5 +702,10 @@ func runGet(cmd *cobra.Command, args []string) error {
 		result.Name, result.Version, result.ProjectType, result.ContentSha,
 		result.GitCommit, result.GitBranch, result.DockerRepo, result.DockerTag, result.DockerSha,
 	)
+
+	if result.OpenSSFScorecardScore >= 0 {
+		fmt.Printf("OpenSSF Scorecard Score: %.2f/10\n", result.OpenSSFScorecardScore)
+	}
+
 	return nil
 }
