@@ -1,7 +1,11 @@
 // Package model - ProjectRelease defines the struct and handles marshaling/unmarshaling the struct to/from NFT Storage.
 package model
 
-import "time"
+import (
+	"time"
+
+	scorecard "github.com/ossf/scorecard/v5/pkg/scorecard"
+)
 
 // ProjectRelease defines a Version of an Component for a List View
 type ProjectRelease struct {
@@ -41,9 +45,17 @@ type ProjectRelease struct {
 	GitTotalCommittersCnt    string    `json:"gittotalcommittescnt,omitempty"`
 	GitURL                   string    `json:"giturl,omitempty"`
 	GitVerifyCommit          bool      `json:"gitverifycommit,omitempty"`
+
+	// OpenSSF Scorecard Results (https://github.com/ossf/scorecard)
+	// Import: github.com/ossf/scorecard/v5/pkg/scorecard
+	OpenSSFScorecardScore float64           `json:"openssf_scorecard_score,omitempty"` // Aggregate score 0-10
+	ScorecardResult       *scorecard.Result `json:"scorecard_result,omitempty"`        // Complete result with all checks
 }
 
 // NewProjectRelease is the contructor that sets the appropriate default values
 func NewProjectRelease() *ProjectRelease {
-	return &ProjectRelease{ObjType: "ProjectRelease"}
+	return &ProjectRelease{
+		ObjType:               "ProjectRelease",
+		OpenSSFScorecardScore: -1, // -1 indicates not yet assessed
+	}
 }

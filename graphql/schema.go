@@ -29,6 +29,7 @@ var SeverityType = graphql.NewEnum(graphql.EnumConfig{
 		"HIGH":     &graphql.EnumValueConfig{Value: "high"},
 		"MEDIUM":   &graphql.EnumValueConfig{Value: "medium"},
 		"LOW":      &graphql.EnumValueConfig{Value: "low"},
+		"NONE":     &graphql.EnumValueConfig{Value: "none"},
 	},
 })
 
@@ -458,6 +459,96 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 
 	log.Printf("Querying releases affected by %s severity", severity)
 
+	// Special case: NONE severity returns all releases without CVE filtering
+	// This is much faster as it skips all edge traversals and CVE lookups
+	if severityScore == 0.0 {
+		query := `
+			FOR release IN release
+				RETURN {
+					cve_id: null,
+					cve_summary: null,
+					cve_details: null,
+					cve_severity_score: null,
+					cve_severity_rating: null,
+					cve_published: null,
+					cve_modified: null,
+					cve_aliases: [],
+					affected_data: null,
+					package: null,
+					version: null,
+					full_purl: null,
+					release_name: release.name,
+					release_version: release.version,
+					content_sha: release.contentsha,
+					project_type: release.projecttype
+				}
+		`
+
+		cursor, err := db.Database.Query(ctx, query, nil)
+		if err != nil {
+			return nil, err
+		}
+		defer cursor.Close()
+
+		type Candidate struct {
+			CveID             *string          `json:"cve_id"`
+			CveSummary        *string          `json:"cve_summary"`
+			CveDetails        *string          `json:"cve_details"`
+			CveSeverityScore  *float64         `json:"cve_severity_score"`
+			CveSeverityRating *string          `json:"cve_severity_rating"`
+			CvePublished      *string          `json:"cve_published"`
+			CveModified       *string          `json:"cve_modified"`
+			CveAliases        []string         `json:"cve_aliases"`
+			AffectedData      *models.Affected `json:"affected_data"`
+			Package           *string          `json:"package"`
+			Version           *string          `json:"version"`
+			FullPurl          *string          `json:"full_purl"`
+			ReleaseName       string           `json:"release_name"`
+			ReleaseVersion    string           `json:"release_version"`
+			ContentSha        string           `json:"content_sha"`
+			ProjectType       string           `json:"project_type"`
+		}
+
+		var affectedReleases []map[string]interface{}
+		seen := make(map[string]bool)
+
+		for cursor.HasMore() {
+			var candidate Candidate
+			_, err := cursor.ReadDocument(ctx, &candidate)
+			if err != nil {
+				continue
+			}
+
+			key := candidate.ReleaseName + ":" + candidate.ReleaseVersion
+			if seen[key] {
+				continue
+			}
+			seen[key] = true
+
+			affectedReleases = append(affectedReleases, map[string]interface{}{
+				"cve_id":           nil,
+				"summary":          nil,
+				"details":          nil,
+				"severity_score":   nil,
+				"severity_rating":  nil,
+				"published":        nil,
+				"modified":         nil,
+				"aliases":          []string{},
+				"package":          nil,
+				"affected_version": nil,
+				"full_purl":        nil,
+				"fixed_in":         []string{},
+				"release_name":     candidate.ReleaseName,
+				"release_version":  candidate.ReleaseVersion,
+				"content_sha":      candidate.ContentSha,
+				"project_type":     candidate.ProjectType,
+			})
+		}
+
+		return affectedReleases, nil
+	}
+
+	// Standard query for severity > NONE (with CVE filtering)
 	query := `
 		FOR release IN release
 			
@@ -800,6 +891,7 @@ func CreateSchema() (graphql.Schema, error) {
 				},
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					severity := p.Args["severity"].(string)
+					// Normalize to lowercase to handle mixed/upper case from clients
 					return resolveAffectedReleases(strings.ToLower(severity))
 				},
 			},
@@ -824,6 +916,7 @@ func CreateSchema() (graphql.Schema, error) {
 				},
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					severity := p.Args["severity"].(string)
+					// Normalize to lowercase to handle mixed/upper case from clients
 					// TODO: Add filtering by environment and endpoint_type
 					return resolveAffectedEndpoints(strings.ToLower(severity))
 				},
