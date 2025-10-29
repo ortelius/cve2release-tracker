@@ -119,10 +119,18 @@ Post-Deployment Vulnerability Remediation is a comprehensive vulnerability manag
 
 **Flow:**
 
-```text
-New CVE Alert → Parse CVSS Vector → Calculate Severity Rating → Match to PURL Hub → 
-Find SBOMs with affected versions → Traverse to Releases → Link to Sync Records → 
-Identify Endpoints
+```mermaid
+flowchart LR
+    A[New CVE Alert] --> B[Parse CVSS Vector]
+    B --> C[Calculate Severity Rating]
+    C --> D[Match to PURL Hub]
+    D --> E[Find SBOMs with<br/>affected versions]
+    E --> F[Traverse to Releases]
+    F --> G[Link to Sync Records]
+    G --> H[Identify Endpoints]
+    
+    style A fill:#ff6b6b
+    style H fill:#51cf66
 ```
 
 **Result:** Security teams know exactly which cloud endpoints, Kubernetes clusters, edge devices, and mission assets are running the vulnerable code, with precise severity classification.
@@ -138,9 +146,16 @@ Identify Endpoints
 
 **Flow:**
 
-```text
-Identified Vulnerable Release → Trace to Source Repo → Find Fix Version → 
-Locate Binary Artifact → Identify Sync Records → Generate Remediation Plan
+```mermaid
+flowchart LR
+    A[Identified Vulnerable Release] --> B[Trace to Source Repo]
+    B --> C[Find Fix Version]
+    C --> D[Locate Binary Artifact]
+    D --> E[Identify Sync Records]
+    E --> F[Generate Remediation Plan]
+    
+    style A fill:#ff6b6b
+    style F fill:#51cf66
 ```
 
 **Result:** Teams have complete remediation path from source code to production deployment, with severity-based prioritization.
@@ -251,358 +266,258 @@ erDiagram
 
 ## Hub-and-Spoke Architecture: Visual Guide
 
-This section provides visual representations of the hub-and-spoke architecture to make it easier to understand how vulnerabilities, packages, and releases are connected.   See [Hub and Spoke Guide](hub_and_spoke_guide.md) for detailed explaination and examples.
+This section provides visual representations of the hub-and-spoke architecture to make it easier to understand how vulnerabilities, packages, and releases are connected. See [Hub and Spoke Guide](hub_and_spoke_guide.md) for detailed explanation and examples.
 
 ### Architecture Overview Diagram
 
-```text
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                    POST-DEPLOYMENT VULNERABILITY TRACKING                    │
-│                          Hub-and-Spoke Architecture                          │
-└─────────────────────────────────────────────────────────────────────────────┘
-
-                    ┌───────────────────────────────┐
-                    │    VULNERABILITY DOMAIN       │
-                    │         (Spokes)              │
-                    └───────────────┬───────────────┘
-                                    │
-                    ┌───────────────▼───────────────┐
-                    │       CVE DOCUMENTS           │
-                    ├───────────────────────────────┤
-                    │  CVE-2024-1234 (lodash)       │
-                    │  CVE-2024-5678 (express)      │
-                    │  CVE-2024-9999 (axios)        │
-                    └───────────────┬───────────────┘
-                                    │
-                            CVE2PURL Edges
-                                    │
-                    ┌───────────────▼───────────────┐
-                    │        PURL HUB LAYER         │
-                    │    (Central Hub Nodes)        │
-                    ├───────────────────────────────┤
-                    │   pkg:npm/lodash              │◄─── Base Package ID
-                    │   pkg:npm/express             │     (No Version)
-                    │   pkg:npm/axios               │
-                    │   pkg:pypi/django             │
-                    │   pkg:maven/log4j             │
-                    └───────────────┬───────────────┘
-                                    │
-                           SBOM2PURL Edges
-                          (with version metadata)
-                                    │
-                    ┌───────────────▼───────────────┐
-                    │         SBOM DOCUMENTS        │
-                    ├───────────────────────────────┤
-                    │  SBOM-A (500 components)      │
-                    │  SBOM-B (350 components)      │
-                    │  SBOM-C (420 components)      │
-                    └───────────────┬───────────────┘
-                                    │
-                          RELEASE2SBOM Edges
-                                    │
-                    ┌───────────────▼───────────────┐
-                    │      PROJECT RELEASES         │
-                    │         (Spokes)              │
-                    ├───────────────────────────────┤
-                    │  frontend-app v1.0            │
-                    │  api-service v2.1             │
-                    │  worker-service v3.0          │
-                    └───────────────┬───────────────┘
-                                    │
-                              SYNC Records
-                                    │
-                    ┌───────────────▼───────────────┐
-                    │    DEPLOYMENT ENDPOINTS       │
-                    │         (Spokes)              │
-                    ├───────────────────────────────┤
-                    │  prod-k8s-us-east (cluster)   │
-                    │  prod-lambda-us-west          │
-                    │  edge-device-001              │
-                    └───────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph VulnDomain["VULNERABILITY DOMAIN (Spokes)"]
+        CVEDocs["CVE DOCUMENTS<br/>CVE-2024-1234 (lodash)<br/>CVE-2024-5678 (express)<br/>CVE-2024-9999 (axios)"]
+    end
+    
+    subgraph PURLHub["PURL HUB LAYER (Central Hub Nodes)"]
+        PURLNodes["pkg:npm/lodash<br/>pkg:npm/express<br/>pkg:npm/axios<br/>pkg:pypi/django<br/>pkg:maven/log4j"]
+    end
+    
+    subgraph SBOMDomain["SBOM DOCUMENTS"]
+        SBOMDocs["SBOM-A (500 components)<br/>SBOM-B (350 components)<br/>SBOM-C (420 components)"]
+    end
+    
+    subgraph ReleaseDomain["PROJECT RELEASES (Spokes)"]
+        Releases["frontend-app v1.0<br/>api-service v2.1<br/>worker-service v3.0"]
+    end
+    
+    subgraph EndpointDomain["DEPLOYMENT ENDPOINTS (Spokes)"]
+        Endpoints["prod-k8s-us-east (cluster)<br/>prod-lambda-us-west<br/>edge-device-001"]
+    end
+    
+    CVEDocs -->|CVE2PURL Edges| PURLHub
+    PURLHub -->|SBOM2PURL Edges<br/>with version metadata| SBOMDomain
+    SBOMDomain -->|RELEASE2SBOM Edges| ReleaseDomain
+    ReleaseDomain -->|SYNC Records| EndpointDomain
+    
+    style VulnDomain fill:#ffe0e0
+    style PURLHub fill:#e0f0ff
+    style SBOMDomain fill:#e0ffe0
+    style ReleaseDomain fill:#fff0e0
+    style EndpointDomain fill:#f0e0ff
 ```
 
 ### Detailed Hub Example: Single Package
 
 This diagram shows how multiple CVEs and multiple SBOMs connect through a single PURL hub:
 
-```text
-                       LODASH PACKAGE ECOSYSTEM
-                    ═══════════════════════════════
-
-CVE LAYER (Vulnerabilities)          SBOM LAYER (Releases)
-─────────────────────────            ─────────────────────
-
-CVE-2024-1234                         SBOM-001
-"Prototype Pollution"                 ├─ lodash: 4.17.20
-  affects: 4.17.0-4.17.20            ├─ express: 4.18.0
-                │                     └─ axios: 1.3.0
-                │                           │
-CVE-2024-5678   │                           │
-"ReDoS Attack"  │                     SBOM-002
-  affects: 4.0.0-4.17.19              ├─ lodash: 4.17.19
-                │                     ├─ react: 18.0.0
-                │                     └─ redux: 4.2.0
-                │                           │
-                └────────────┬──────────────┘
-                             │
-                    ┌────────▼────────┐
-                    │   PURL HUB      │
-                    │                 │
-                    │  pkg:npm/lodash │◄──── Single hub node
-                    │                 │      for ALL lodash
-                    │  (version-free) │      references
-                    └────────┬────────┘
-                             │
-                ┌────────────┴──────────────┐
-                │                           │
-        version: 4.17.20              version: 4.17.19
-        (on edge metadata)            (on edge metadata)
-                │                           │
-                ▼                           ▼
-            SBOM-001 ──────→ Release: frontend-app v1.0
-                              └─→ Sync → prod-k8s-us-east
-            
-            SBOM-002 ──────→ Release: api-service v2.1
-                              └─→ Sync → prod-lambda
-
-VULNERABILITY MATCHING LOGIC:
-─────────────────────────────
-CVE-2024-1234 affects 4.17.0-4.17.20
-  ✓ Matches SBOM-001 (version 4.17.20) ──→ frontend-app v1.0 VULNERABLE
-  ✗ Skips SBOM-002 (version 4.17.19)   ──→ api-service v2.1 SAFE
-
-CVE-2024-5678 affects 4.0.0-4.17.19
-  ✗ Skips SBOM-001 (version 4.17.20)   ──→ frontend-app v1.0 SAFE
-  ✓ Matches SBOM-002 (version 4.17.19) ──→ api-service v2.1 VULNERABLE
+```mermaid
+flowchart TB
+    subgraph CVELayer["CVE LAYER - Vulnerabilities"]
+        CVE1["CVE-2024-1234<br/>'Prototype Pollution'<br/>affects: 4.17.0-4.17.20"]
+        CVE2["CVE-2024-5678<br/>'ReDoS Attack'<br/>affects: 4.0.0-4.17.19"]
+    end
+    
+    subgraph Hub["PURL HUB"]
+        PURL["pkg:npm/lodash<br/>(version-free)<br/>Single hub node for<br/>ALL lodash references"]
+    end
+    
+    subgraph SBOMLayer["SBOM LAYER - Releases"]
+        SBOM1["SBOM-001<br/>├─ lodash: 4.17.20<br/>├─ express: 4.18.0<br/>└─ axios: 1.3.0"]
+        SBOM2["SBOM-002<br/>├─ lodash: 4.17.19<br/>├─ react: 18.0.0<br/>└─ redux: 4.2.0"]
+    end
+    
+    subgraph ReleaseLayer["RELEASES"]
+        REL1["frontend-app v1.0"]
+        REL2["api-service v2.1"]
+    end
+    
+    subgraph EndpointLayer["ENDPOINTS"]
+        EP1["prod-k8s-us-east"]
+        EP2["prod-lambda"]
+    end
+    
+    subgraph Matching["VULNERABILITY MATCHING LOGIC"]
+        Match1["CVE-2024-1234 affects 4.17.0-4.17.20<br/>✓ Matches SBOM-001 (version 4.17.20)<br/>✗ Skips SBOM-002 (version 4.17.19)"]
+        Match2["CVE-2024-5678 affects 4.0.0-4.17.19<br/>✗ Skips SBOM-001 (version 4.17.20)<br/>✓ Matches SBOM-002 (version 4.17.19)"]
+    end
+    
+    CVE1 & CVE2 -->|CVE2PURL| PURL
+    PURL -->|SBOM2PURL<br/>version: 4.17.20<br/>on edge metadata| SBOM1
+    PURL -->|SBOM2PURL<br/>version: 4.17.19<br/>on edge metadata| SBOM2
+    SBOM1 -->|RELEASE2SBOM| REL1
+    SBOM2 -->|RELEASE2SBOM| REL2
+    REL1 -->|SYNC| EP1
+    REL2 -->|SYNC| EP2
+    
+    style CVE1 fill:#ff6b6b
+    style CVE2 fill:#ff6b6b
+    style PURL fill:#4dabf7
+    style SBOM1 fill:#69db7c
+    style SBOM2 fill:#69db7c
+    style Matching fill:#fff3bf
 ```
 
 ### Query Flow Visualization
 
 This shows how a query traverses the graph from CVE to deployed endpoint:
 
-```text
-QUERY: "Which production endpoints are running CVE-2024-1234?"
-
-STEP 1: Start at CVE Document
-┌─────────────────────────────────────┐
-│ CVE-2024-1234                       │
-│ ├─ id: "CVE-2024-1234"             │
-│ ├─ summary: "Prototype Pollution"  │
-│ ├─ severity_rating: "CRITICAL"     │
-│ └─ affected:                        │
-│    └─ package: "pkg:npm/lodash"    │
-│       versions: 4.17.0-4.17.20     │
-└─────────────────┬───────────────────┘
-                  │
-                  │ CVE2PURL Edge
-                  │
-STEP 2: Traverse to PURL Hub
-                  ▼
-┌─────────────────────────────────────┐
-│ PURL Hub: pkg:npm/lodash            │
-│ (Unique hub for all lodash refs)   │
-└─────────────────┬───────────────────┘
-                  │
-                  │ SBOM2PURL Edges
-                  │ (with version metadata)
-                  │
-STEP 3: Find Connected SBOMs
-                  ├──────────────┬──────────────┐
-                  ▼              ▼              ▼
-            ┌─────────┐    ┌─────────┐    ┌─────────┐
-            │ SBOM-A  │    │ SBOM-B  │    │ SBOM-C  │
-            │ v4.17.20│    │ v4.17.19│    │ v4.17.21│
-            └────┬────┘    └────┬────┘    └────┬────┘
-                 │              │              │
-STEP 4: Filter by Version Range (in Go code)
-    ✓ MATCHES       ✗ TOO OLD       ✗ TOO NEW
-    (4.17.20)       (4.17.19)       (4.17.21)
-                 │
-                 │ RELEASE2SBOM Edge
-                 │
-STEP 5: Traverse to Releases
-                 ▼
-        ┌──────────────────┐
-        │ Release          │
-        │ frontend-app v1.0│
-        └────────┬─────────┘
-                 │
-                 │ SYNC Record
-                 │
-STEP 6: Find Deployment Endpoints
-                 ▼
-        ┌──────────────────────┐
-        │ Endpoint             │
-        │ prod-k8s-us-east     │
-        │ type: cluster        │
-        │ env: production      │
-        └──────────────────────┘
-
-RESULT: frontend-app v1.0 on prod-k8s-us-east is VULNERABLE to CVE-2024-1234
+```mermaid
+flowchart TB
+    Start["<b>QUERY:</b> Which production endpoints<br/>are running CVE-2024-1234?"] --> Step1
+    
+    Step1["<b>STEP 1:</b> Start at CVE Document"] --> CVE
+    CVE["CVE-2024-1234<br/>├─ id: CVE-2024-1234<br/>├─ summary: Prototype Pollution<br/>├─ severity_rating: CRITICAL<br/>└─ affected:<br/>    └─ package: pkg:npm/lodash<br/>       versions: 4.17.0-4.17.20"]
+    
+    CVE -->|CVE2PURL Edge| Step2["<b>STEP 2:</b> Traverse to PURL Hub"]
+    Step2 --> PURL["PURL Hub: pkg:npm/lodash<br/>(Unique hub for all lodash refs)"]
+    
+    PURL -->|SBOM2PURL Edges<br/>with version metadata| Step3["<b>STEP 3:</b> Find Connected SBOMs"]
+    
+    Step3 --> SBOMs
+    subgraph SBOMs["SBOMs Found"]
+        SBOM_A["SBOM-A<br/>v4.17.20"]
+        SBOM_B["SBOM-B<br/>v4.17.19"]
+        SBOM_C["SBOM-C<br/>v4.17.21"]
+    end
+    
+    SBOMs --> Step4["<b>STEP 4:</b> Filter by Version Range<br/>(in Go code)"]
+    
+    Step4 --> Filters
+    subgraph Filters["Version Filtering"]
+        Filter_A["✓ MATCHES<br/>(4.17.20)"]
+        Filter_B["✗ TOO OLD<br/>(4.17.19)"]
+        Filter_C["✗ TOO NEW<br/>(4.17.21)"]
+    end
+    
+    Filter_A -->|RELEASE2SBOM Edge| Step5["<b>STEP 5:</b> Traverse to Releases"]
+    Step5 --> REL["Release<br/>frontend-app v1.0"]
+    
+    REL -->|SYNC Record| Step6["<b>STEP 6:</b> Find Deployment Endpoints"]
+    Step6 --> EP["Endpoint<br/>prod-k8s-us-east<br/>type: cluster<br/>env: production"]
+    
+    EP --> Result["<b>RESULT:</b><br/>frontend-app v1.0 on prod-k8s-us-east<br/>is VULNERABLE to CVE-2024-1234"]
+    
+    style Start fill:#e3f2fd
+    style CVE fill:#ff6b6b
+    style PURL fill:#4dabf7
+    style Filter_A fill:#51cf66
+    style Filter_B fill:#ffd43b
+    style Filter_C fill:#ffd43b
+    style EP fill:#cc5de8
+    style Result fill:#ff6b6b
 ```
 
 ### Edge Metadata: The Key to Version Tracking
 
-```text
-WHY STORE VERSIONS ON EDGES, NOT NODES?
-
-❌ APPROACH 1: Version in PURL Node (Rejected)
-├─ pkg:npm/lodash@4.17.20
-├─ pkg:npm/lodash@4.17.19
-├─ pkg:npm/lodash@4.17.21
-└─ ... (thousands of version-specific nodes)
-
-PROBLEMS:
-- Massive node duplication (1 node per version)
-- CVE edges must connect to ALL version nodes
-- Harder to query "all versions of lodash"
-- More storage, slower queries
-
-✓ APPROACH 2: Version in Edge Metadata (Implemented)
-┌──────────────────┐
-│ PURL Hub         │
-│ pkg:npm/lodash   │◄──── Single node for package
-└────────┬─────────┘
-         │
-    ┌────┴────┬────────┬────────┐
-    │         │        │        │
-SBOM2PURL  SBOM2PURL  SBOM2PURL  SBOM2PURL
-Edge #1    Edge #2    Edge #3    Edge #4
-version:   version:   version:   version:
-"4.17.20"  "4.17.19"  "4.17.21"  "4.17.18"
-    │         │        │        │
-    ▼         ▼        ▼        ▼
-SBOM-A    SBOM-B   SBOM-C   SBOM-D
-
-BENEFITS:
-✓ One PURL node per package (minimal nodes)
-✓ CVE connects to one hub (simple edges)
-✓ Version filtering done on edges (fast)
-✓ Easy to query "all versions" or "specific version"
+```mermaid
+flowchart TB
+    subgraph Wrong["❌ APPROACH 1: Version in PURL Node (Rejected)"]
+        W1["pkg:npm/lodash@4.17.20"]
+        W2["pkg:npm/lodash@4.17.19"]
+        W3["pkg:npm/lodash@4.17.21"]
+        W4["... (thousands of version-specific nodes)"]
+        
+        WProblems["<b>PROBLEMS:</b><br/>- Massive node duplication (1 node per version)<br/>- CVE edges must connect to ALL version nodes<br/>- Harder to query 'all versions of lodash'<br/>- More storage, slower queries"]
+    end
+    
+    subgraph Right["✓ APPROACH 2: Version in Edge Metadata (Implemented)"]
+        Hub["PURL Hub<br/>pkg:npm/lodash<br/>Single node for package"]
+        
+        Hub -->|SBOM2PURL Edge #1<br/>version: 4.17.20| S1["SBOM-A"]
+        Hub -->|SBOM2PURL Edge #2<br/>version: 4.17.19| S2["SBOM-B"]
+        Hub -->|SBOM2PURL Edge #3<br/>version: 4.17.21| S3["SBOM-C"]
+        Hub -->|SBOM2PURL Edge #4<br/>version: 4.17.18| S4["SBOM-D"]
+        
+        RBenefits["<b>BENEFITS:</b><br/>✓ One PURL node per package (minimal nodes)<br/>✓ CVE connects to one hub (simple edges)<br/>✓ Version filtering done on edges (fast)<br/>✓ Easy to query 'all versions' or 'specific version'"]
+    end
+    
+    style Wrong fill:#ffe0e0
+    style Right fill:#e0ffe0
+    style Hub fill:#4dabf7
+    style WProblems fill:#ff6b6b
+    style RBenefits fill:#51cf66
 ```
 
 ### Scale Comparison: With vs. Without Hub Architecture
 
-```text
-SCENARIO: 1,000 CVEs affecting lodash across 10,000 SBOMs
-
-WITHOUT HUB (Direct CVE → SBOM edges):
-┌─────────┐     ┌─────────┐     ┌─────────┐
-│CVE-0001 │────▶│ SBOM-01 │     │ SBOM-02 │◀───┐
-└─────────┘     └─────────┘     └─────────┘    │
-     │               ▲               ▲          │
-     │               │               │          │
-     └───────────────┴───────────────┴──────────┘
-           ... 10,000 edges from each CVE ...
-
-Total Edges: 1,000 CVEs × 10,000 SBOMs = 10,000,000 edges
-Edge Growth: O(N × M) - Exponential
-Storage: ~1GB for edges alone
-Query Time: Seconds to find all affected SBOMs
-
-
-WITH HUB (CVE → PURL → SBOM):
-┌─────────┐     ┌──────────┐     ┌─────────┐
-│CVE-0001 │────▶│   PURL   │◀────│ SBOM-01 │
-└─────────┘     │   HUB    │     └─────────┘
-┌─────────┐     │  lodash  │     ┌─────────┐
-│CVE-0002 │────▶│          │◀────│ SBOM-02 │
-└─────────┘     └──────────┘     └─────────┘
-     ...             ▲               ...
-┌─────────┐          │           ┌─────────┐
-│CVE-1000 │──────────┘           │SBOM-10K │
-└─────────┘                      └─────────┘
-
-Total Edges: 1,000 + 10,000 = 11,000 edges
-Edge Growth: O(N + M) - Linear
-Storage: ~10MB for edges
-Query Time: Milliseconds to find all affected SBOMs
-
-REDUCTION: 99.89% fewer edges!
+```mermaid
+flowchart TB
+    subgraph Scenario["<b>SCENARIO:</b> 1,000 CVEs affecting lodash across 10,000 SBOMs"]
+    end
+    
+    subgraph Without["WITHOUT HUB (Direct CVE → SBOM edges)"]
+        WC1["CVE-0001"] -.->|10,000 edges| WS1["SBOM-01"]
+        WC1 -.-> WS2["SBOM-02"]
+        WC2["CVE-0002"] -.-> WS1
+        WC2 -.-> WS2
+        WC3["..."] -.-> WS3["..."]
+        WC4["CVE-1000"] -.-> WS4["SBOM-10K"]
+        
+        WStats["<b>Total Edges:</b> 10,000,000<br/><b>Edge Growth:</b> O(N × M) - Exponential<br/><b>Storage:</b> ~1GB for edges alone<br/><b>Query Time:</b> Seconds"]
+    end
+    
+    subgraph With["WITH HUB (CVE → PURL → SBOM)"]
+        HC1["CVE-0001"] --> HHub["PURL HUB<br/>lodash"]
+        HC2["CVE-0002"] --> HHub
+        HC3["..."] --> HHub
+        HC4["CVE-1000"] --> HHub
+        
+        HHub --> HS1["SBOM-01"]
+        HHub --> HS2["SBOM-02"]
+        HHub --> HS3["..."]
+        HHub --> HS4["SBOM-10K"]
+        
+        HStats["<b>Total Edges:</b> 11,000<br/><b>Edge Growth:</b> O(N + M) - Linear<br/><b>Storage:</b> ~10MB for edges<br/><b>Query Time:</b> Milliseconds"]
+    end
+    
+    Scenario --> Without
+    Scenario --> With
+    
+    Without -.->|"<b>REDUCTION:</b><br/>99.89% fewer edges!"| With
+    
+    style Scenario fill:#e3f2fd
+    style Without fill:#ffe0e0
+    style With fill:#e0ffe0
+    style HHub fill:#4dabf7
+    style WStats fill:#ff6b6b
+    style HStats fill:#51cf66
 ```
 
 ### Real-World Data Flow Example
 
-```text
-COMPLETE FLOW: From CVE Publication to Endpoint Identification
-
-┌─────────────────────────────────────────────────────────────────┐
-│ 1. CVE PUBLICATION (OSV.dev)                                    │
-├─────────────────────────────────────────────────────────────────┤
-│ CVE-2024-1234 published for lodash                              │
-│ Affected: 4.17.0 <= version <= 4.17.20                         │
-│ CVSS: 9.8 (CRITICAL)                                           │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         │ Ingestion Pipeline
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 2. CVE INGESTION                                                │
-├─────────────────────────────────────────────────────────────────┤
-│ Parse OSV data                                                  │
-│ Extract PURL: pkg:npm/lodash (base form)                       │
-│ Calculate CVSS score: 9.8                                       │
-│ Determine severity_rating: "CRITICAL"                           │
-│ Create CVE document in ArangoDB                                 │
-│ Create CVE2PURL edge to lodash hub                             │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         │ Graph Connection
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 3. PURL HUB (Already exists or created)                        │
-├─────────────────────────────────────────────────────────────────┤
-│ Node: pkg:npm/lodash                                           │
-│ Connected to:                                                   │
-│   ← 15 CVEs (via CVE2PURL edges)                              │
-│   → 1,247 SBOMs (via SBOM2PURL edges with version metadata)   │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         │ SBOM References
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 4. EXISTING SBOMs                                               │
-├─────────────────────────────────────────────────────────────────┤
-│ SBOM-A: frontend-app → lodash@4.17.20 ✓ VULNERABLE            │
-│ SBOM-B: api-service  → lodash@4.17.19 ✓ VULNERABLE            │
-│ SBOM-C: worker-svc   → lodash@4.17.21 ✗ SAFE (too new)        │
-│ SBOM-D: auth-service → lodash@4.18.0  ✗ SAFE (too new)        │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         │ Version Match Filter
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 5. AFFECTED RELEASES                                            │
-├─────────────────────────────────────────────────────────────────┤
-│ frontend-app v1.0 (via SBOM-A)                                 │
-│ api-service v2.1  (via SBOM-B)                                 │
-└────────────────────────┬────────────────────────────────────────┘
-                         │
-                         │ SYNC Records
-                         ▼
-┌─────────────────────────────────────────────────────────────────┐
-│ 6. DEPLOYED ENDPOINTS                                           │
-├─────────────────────────────────────────────────────────────────┤
-│ frontend-app v1.0:                                              │
-│   ├─ prod-k8s-us-east (cluster, production)                    │
-│   └─ staging-k8s      (cluster, staging)                       │
-│ api-service v2.1:                                               │
-│   ├─ prod-lambda-us-west (lambda, production)                  │
-│   └─ prod-ecs-eu-west    (ecs, production)                     │
-└─────────────────────────────────────────────────────────────────┘
-
-FINAL RESULT:
-━━━━━━━━━━━━
-4 production endpoints are running code vulnerable to CVE-2024-1234:
-1. prod-k8s-us-east      (frontend-app v1.0)
-2. prod-lambda-us-west   (api-service v2.1)
-3. prod-ecs-eu-west      (api-service v2.1)
-
-Security team can now:
-→ Create tickets for remediation
-→ Apply patches to these specific endpoints
-→ Monitor for exploitation attempts
-→ Generate compliance reports
+```mermaid
+flowchart TB
+    Step1["<b>1. CVE PUBLICATION (OSV.dev)</b><br/>CVE-2024-1234 published for lodash<br/>Affected: 4.17.0 ≤ version ≤ 4.17.20<br/>CVSS: 9.8 (CRITICAL)"]
+    
+    Step1 -->|Ingestion Pipeline| Step2
+    
+    Step2["<b>2. CVE INGESTION</b><br/>Parse OSV data<br/>Extract PURL: pkg:npm/lodash (base form)<br/>Calculate CVSS score: 9.8<br/>Determine severity_rating: CRITICAL<br/>Create CVE document in ArangoDB<br/>Create CVE2PURL edge to lodash hub"]
+    
+    Step2 -->|Graph Connection| Step3
+    
+    Step3["<b>3. PURL HUB</b><br/>Node: pkg:npm/lodash<br/>Connected to:<br/>  ← 15 CVEs (via CVE2PURL edges)<br/>  → 1,247 SBOMs (via SBOM2PURL edges)"]
+    
+    Step3 -->|SBOM References| Step4
+    
+    Step4["<b>4. EXISTING SBOMs</b><br/>SBOM-A: frontend-app → lodash@4.17.20 ✓ VULNERABLE<br/>SBOM-B: api-service → lodash@4.17.19 ✓ VULNERABLE<br/>SBOM-C: worker-svc → lodash@4.17.21 ✗ SAFE (too new)<br/>SBOM-D: auth-service → lodash@4.18.0 ✗ SAFE (too new)"]
+    
+    Step4 -->|Version Match Filter| Step5
+    
+    Step5["<b>5. AFFECTED RELEASES</b><br/>frontend-app v1.0 (via SBOM-A)<br/>api-service v2.1 (via SBOM-B)"]
+    
+    Step5 -->|SYNC Records| Step6
+    
+    Step6["<b>6. DEPLOYED ENDPOINTS</b><br/>frontend-app v1.0:<br/>  ├─ prod-k8s-us-east (cluster, production)<br/>  └─ staging-k8s (cluster, staging)<br/>api-service v2.1:<br/>  ├─ prod-lambda-us-west (lambda, production)<br/>  └─ prod-ecs-eu-west (ecs, production)"]
+    
+    Step6 --> Result
+    
+    Result["<b>FINAL RESULT:</b><br/>4 production endpoints running vulnerable code:<br/>1. prod-k8s-us-east (frontend-app v1.0)<br/>2. prod-lambda-us-west (api-service v2.1)<br/>3. prod-ecs-eu-west (api-service v2.1)<br/><br/><b>Security team can now:</b><br/>→ Create tickets for remediation<br/>→ Apply patches to these specific endpoints<br/>→ Monitor for exploitation attempts<br/>→ Generate compliance reports"]
+    
+    style Step1 fill:#ff6b6b
+    style Step2 fill:#ffd43b
+    style Step3 fill:#4dabf7
+    style Step4 fill:#69db7c
+    style Step5 fill:#ffd43b
+    style Step6 fill:#cc5de8
+    style Result fill:#ff6b6b
 ```
 
 ### Key Design Features
@@ -617,18 +532,32 @@ Instead of creating direct connections between every CVE and every SBOM componen
 
 **How It Works:**
 
-```text
-VULNERABILITY DOMAIN          HUB LAYER              RELEASE DOMAIN
-─────────────────────        ───────────            ──────────────
-
-CVE-2024-1234 ─────┐
-CVE-2024-5678 ─────┼──────→ PURL Hub ←──────┬───── SBOM-A (v4.17.20)
-CVE-2024-9999 ─────┘       pkg:npm/lodash   └───── SBOM-B (v4.17.19)
-                                ↑                    SBOM-C (v4.17.21)
-                           (Base Package)
-                           
-Multiple CVEs affecting     Single hub node         Multiple SBOMs using
-the same package           for all lodash CVEs     different versions
+```mermaid
+flowchart LR
+    subgraph VulnDomain["VULNERABILITY DOMAIN"]
+        CVE1[CVE-2024-1234]
+        CVE2[CVE-2024-5678]
+        CVE3[CVE-2024-9999]
+    end
+    
+    subgraph HubLayer["HUB LAYER"]
+        Hub["PURL Hub<br/>pkg:npm/lodash<br/>(Base Package)"]
+    end
+    
+    subgraph ReleaseDomain["RELEASE DOMAIN"]
+        SBOM1["SBOM-A<br/>(v4.17.20)"]
+        SBOM2["SBOM-B<br/>(v4.17.19)"]
+        SBOM3["SBOM-C<br/>(v4.17.21)"]
+    end
+    
+    CVE1 & CVE2 & CVE3 -->|Multiple CVEs<br/>affecting same package| Hub
+    Hub -->|Single hub node<br/>for all lodash CVEs| SBOM1 & SBOM2 & SBOM3
+    
+    Note1["Multiple SBOMs using<br/>different versions"]
+    
+    style VulnDomain fill:#ffe0e0
+    style HubLayer fill:#4dabf7
+    style ReleaseDomain fill:#e0ffe0
 ```
 
 **The Three-Layer Architecture:**
@@ -664,23 +593,26 @@ the same package           for all lodash CVEs     different versions
 
 When asking "Which releases are affected by CVE-2024-1234?", the system:
 
-```text
-1. Start: CVE-2024-1234 document
-   ↓
-2. Traverse: CVE2PURL edge to find PURL hub
-   → Result: pkg:npm/lodash
-   ↓
-3. Traverse: SBOM2PURL edges FROM the PURL hub
-   → Result: All SBOMs using lodash (with version metadata on edges)
-   ↓
-4. Filter: Check version ranges in Go code
-   → Keep only: versions 4.17.0 - 4.17.20 (vulnerable range)
-   ↓
-5. Traverse: RELEASE2SBOM edges to find releases
-   → Result: All releases using vulnerable lodash versions
-   ↓
-6. Traverse: SYNC edges to find endpoints
-   → Result: Production endpoints running vulnerable code
+```mermaid
+flowchart TB
+    Start["1. Start: CVE-2024-1234 document"] --> Trav1
+    Trav1["2. Traverse: CVE2PURL edge<br/>to find PURL hub"] --> Result1
+    Result1["→ Result: pkg:npm/lodash"] --> Trav2
+    Trav2["3. Traverse: SBOM2PURL edges<br/>FROM the PURL hub"] --> Result2
+    Result2["→ Result: All SBOMs using lodash<br/>(with version metadata on edges)"] --> Filter
+    Filter["4. Filter: Check version ranges<br/>in Go code"] --> Result3
+    Result3["→ Keep only: versions 4.17.0 - 4.17.20<br/>(vulnerable range)"] --> Trav3
+    Trav3["5. Traverse: RELEASE2SBOM edges<br/>to find releases"] --> Result4
+    Result4["→ Result: All releases using<br/>vulnerable lodash versions"] --> Trav4
+    Trav4["6. Traverse: SYNC edges<br/>to find endpoints"] --> Result5
+    Result5["→ Result: Production endpoints<br/>running vulnerable code"]
+    
+    style Start fill:#e3f2fd
+    style Result1 fill:#4dabf7
+    style Result2 fill:#69db7c
+    style Result3 fill:#ffd43b
+    style Result4 fill:#fff3bf
+    style Result5 fill:#cc5de8
 ```
 
 **Version Matching Strategy:**
@@ -700,40 +632,69 @@ This separation enables:
 
 **Deduplication Benefits:**
 
-```text
-Scenario: 3 releases all use the same dependencies
-
-WITHOUT HUB ARCHITECTURE:
-Release-A → 500 dependency nodes
-Release-B → 500 dependency nodes (DUPLICATED)
-Release-C → 500 dependency nodes (DUPLICATED)
-Total: 1,500 nodes + CVE edges to each = massive duplication
-
-WITH HUB ARCHITECTURE:
-Release-A ─┐
-Release-B ─┼─→ SBOM-X → 500 PURL hubs ← CVEs
-Release-C ─┘
-Total: 1 SBOM + 500 PURLs (reused) = 501 nodes
+```mermaid
+flowchart TB
+    subgraph Scenario["Scenario: 3 releases all use the same dependencies"]
+    end
+    
+    subgraph Without["WITHOUT HUB ARCHITECTURE"]
+        RA["Release-A"] --> D1["500 dependency nodes"]
+        RB["Release-B"] --> D2["500 dependency nodes<br/>(DUPLICATED)"]
+        RC["Release-C"] --> D3["500 dependency nodes<br/>(DUPLICATED)"]
+        
+        WStats["Total: 1,500 nodes<br/>+ CVE edges to each<br/>= massive duplication"]
+    end
+    
+    subgraph With["WITH HUB ARCHITECTURE"]
+        RA2["Release-A"] --> SBOM["SBOM-X"]
+        RB2["Release-B"] --> SBOM
+        RC2["Release-C"] --> SBOM
+        SBOM --> HubSet["500 PURL hubs"]
+        CVEs["CVEs"] --> HubSet
+        
+        WStats2["Total: 1 SBOM + 500 PURLs (reused)<br/>= 501 nodes"]
+    end
+    
+    Scenario --> Without
+    Scenario --> With
+    
+    style Without fill:#ffe0e0
+    style With fill:#e0ffe0
+    style WStats fill:#ff6b6b
+    style WStats2 fill:#51cf66
 ```
 
 **Real-World Example:**
 
 Consider a vulnerability in `lodash@4.17.20`:
 
-```text
-CVE-2024-1234 "Prototype Pollution in lodash"
-    │
-    ├─→ CVE2PURL edge
-    │
-    └─→ PURL Hub: pkg:npm/lodash
-            │
-            ├─→ SBOM2PURL edge (version: "4.17.20") → SBOM-A → Release: frontend-app v1.0
-            ├─→ SBOM2PURL edge (version: "4.17.19") → SBOM-B → Release: api-service v2.1
-            ├─→ SBOM2PURL edge (version: "4.17.21") → SBOM-C → Release: worker-service v3.0
-            └─→ SBOM2PURL edge (version: "4.17.20") → SBOM-D → Release: auth-service v1.5
-
-Query Result: frontend-app v1.0 and auth-service v1.5 are vulnerable
-              (both use 4.17.20, which falls in CVE's affected range)
+```mermaid
+flowchart TB
+    CVE["CVE-2024-1234<br/>'Prototype Pollution in lodash'"]
+    
+    CVE -->|CVE2PURL edge| Hub["PURL Hub: pkg:npm/lodash"]
+    
+    Hub -->|SBOM2PURL<br/>version: 4.17.20| SBOM1
+    Hub -->|SBOM2PURL<br/>version: 4.17.19| SBOM2
+    Hub -->|SBOM2PURL<br/>version: 4.17.21| SBOM3
+    Hub -->|SBOM2PURL<br/>version: 4.17.20| SBOM4
+    
+    SBOM1["SBOM-A"] --> REL1["Release:<br/>frontend-app v1.0"]
+    SBOM2["SBOM-B"] --> REL2["Release:<br/>api-service v2.1"]
+    SBOM3["SBOM-C"] --> REL3["Release:<br/>worker-service v3.0"]
+    SBOM4["SBOM-D"] --> REL4["Release:<br/>auth-service v1.5"]
+    
+    Result["<b>Query Result:</b><br/>frontend-app v1.0 and auth-service v1.5<br/>are vulnerable<br/>(both use 4.17.20, which falls<br/>in CVE's affected range)"]
+    
+    style CVE fill:#ff6b6b
+    style Hub fill:#4dabf7
+    style SBOM1 fill:#51cf66
+    style SBOM2 fill:#69db7c
+    style SBOM3 fill:#69db7c
+    style SBOM4 fill:#51cf66
+    style REL1 fill:#ff6b6b
+    style REL4 fill:#ff6b6b
+    style Result fill:#fff3bf
 ```
 
 **References & Standards:**
@@ -843,49 +804,61 @@ CVEs without parseable CVSS vectors receive:
 
 ### Ingestion Process
 
-```text
-OSV.dev CVE Data
-    ↓
-Extract CVSS Vector Strings from severity[] array
-    ↓
-For each CVSS vector:
-  ├─→ CVSS:3.0/* → Parse with pandatix/go-cvss v31
-  ├─→ CVSS:3.1/* → Parse with pandatix/go-cvss v31
-  └─→ CVSS:4.0/* → Parse with pandatix/go-cvss v40
-    ↓
-Calculate Base Score (0.0 - 10.0)
-    ↓
-Determine Severity Rating:
-  ├─→ 9.0-10.0 → CRITICAL
-  ├─→ 7.0-8.9  → HIGH
-  ├─→ 4.0-6.9  → MEDIUM
-  ├─→ 0.1-3.9  → LOW
-  └─→ 0.0      → NONE
-    ↓
-Store in database_specific field
-    ↓
-UPSERT CVE document to ArangoDB
+```mermaid
+flowchart TB
+    Start["OSV.dev CVE Data"] --> Extract
+    Extract["Extract CVSS Vector Strings<br/>from severity[] array"] --> Parse
+    
+    subgraph Parse["Parse Each CVSS Vector"]
+        V30["CVSS:3.0/*<br/>→ Parse with pandatix/go-cvss v31"]
+        V31["CVSS:3.1/*<br/>→ Parse with pandatix/go-cvss v31"]
+        V40["CVSS:4.0/*<br/>→ Parse with pandatix/go-cvss v40"]
+    end
+    
+    Parse --> Calc["Calculate Base Score (0.0 - 10.0)"]
+    
+    Calc --> Det["Determine Severity Rating"]
+    
+    subgraph Det
+        C["9.0-10.0 → CRITICAL"]
+        H["7.0-8.9 → HIGH"]
+        M["4.0-6.9 → MEDIUM"]
+        L["0.1-3.9 → LOW"]
+        N["0.0 → NONE"]
+    end
+    
+    Det --> Store["Store in database_specific field"]
+    Store --> Upsert["UPSERT CVE document to ArangoDB"]
+    
+    style Start fill:#e3f2fd
+    style Parse fill:#fff3bf
+    style Det fill:#ffd43b
+    style Upsert fill:#51cf66
 ```
 
 ### Query Optimization
 
-**Before** (Runtime Parsing):
-```text
-Query → For each CVE:
-  └─→ Parse CVSS vector → Calculate score → Compare to threshold
-Result: Slow, O(n) parsing operations
+```mermaid
+flowchart LR
+    subgraph Before["BEFORE (Runtime Parsing)"]
+        B1["Query"] --> B2["For each CVE:<br/>Parse CVSS vector"]
+        B2 --> B3["Calculate score"]
+        B3 --> B4["Compare to threshold"]
+        B5["Result: Slow,<br/>O(n) parsing operations"]
+    end
+    
+    subgraph After["AFTER (Pre-Calculated)"]
+        A1["Query"] --> A2["Filter by severity_rating string"]
+        A3["Result: Fast,<br/>indexed string comparison"]
+    end
+    
+    Before -.->|Performance Impact:<br/>~5-10s → <1s for 100K CVEs| After
+    
+    style Before fill:#ffe0e0
+    style After fill:#e0ffe0
+    style B5 fill:#ff6b6b
+    style A3 fill:#51cf66
 ```
-
-**After** (Pre-Calculated):
-```text
-Query → Filter by severity_rating string
-Result: Fast, indexed string comparison
-```
-
-**Performance Impact:**
-- Query time reduced from ~5-10 seconds to <1 second for 100,000 CVEs
-- Eliminates CPU-intensive CVSS calculations during queries
-- Enables efficient pagination and large result sets
 
 ## Sync and Endpoint Architecture
 
@@ -938,17 +911,28 @@ Sync records track when a specific release version is deployed to an endpoint:
 
 **Steps:**
 
-1. Download CVE data from OSV.dev for all ecosystems
-2. For each CVE:
-   - Extract CVSS vector strings from `severity` array
-   - Parse vectors using `github.com/pandatix/go-cvss` library
-   - Calculate numeric base scores
-   - Determine severity rating (CRITICAL/HIGH/MEDIUM/LOW)
-   - Store in `database_specific` field
-3. Extract base PURLs (package identifiers without versions)
-4. Create CVE → PURL edges in graph
-5. Enrich with MITRE ATT&CK techniques (if configured)
-6. UPSERT to database
+```mermaid
+flowchart TB
+    Start["CVE Ingestion Job Starts"] --> Download
+    Download["1. Download CVE data from OSV.dev<br/>for all ecosystems"] --> ForEach
+    
+    ForEach["2. For each CVE:"] --> Extract
+    Extract["Extract CVSS vector strings<br/>from severity array"] --> Parse
+    Parse["Parse vectors using<br/>github.com/pandatix/go-cvss library"] --> Calculate
+    Calculate["Calculate numeric base scores"] --> Determine
+    Determine["Determine severity rating<br/>(CRITICAL/HIGH/MEDIUM/LOW)"] --> Store
+    Store["Store in database_specific field"] --> PURLs
+    
+    PURLs["3. Extract base PURLs<br/>(package identifiers without versions)"] --> Edges
+    Edges["4. Create CVE → PURL edges in graph"] --> Enrich
+    Enrich["5. Enrich with MITRE ATT&CK techniques<br/>(if configured)"] --> Upsert
+    Upsert["6. UPSERT to database"]
+    
+    style Start fill:#e3f2fd
+    style Parse fill:#fff3bf
+    style Determine fill:#ffd43b
+    style Upsert fill:#51cf66
+```
 
 **CVSS Parsing Logic:**
 
@@ -1016,13 +1000,22 @@ POST /api/v1/releases
 
 **Process:**
 
-1. Validate SBOM structure (must be CycloneDX format)
-2. Extract components and their PURLs
-3. Create or retrieve PURL nodes (base identifiers)
-4. Create Release node with git metadata
-5. Create SBOM node with content hash
-6. Create Release → SBOM edge
-7. Create SBOM → PURL edges with version metadata
+```mermaid
+flowchart TB
+    Start["API Request Received"] --> Validate
+    Validate["1. Validate SBOM structure<br/>(must be CycloneDX format)"] --> Extract
+    Extract["2. Extract components and their PURLs"] --> CreatePURL
+    CreatePURL["3. Create or retrieve PURL nodes<br/>(base identifiers)"] --> CreateRelease
+    CreateRelease["4. Create Release node<br/>with git metadata"] --> CreateSBOM
+    CreateSBOM["5. Create SBOM node<br/>with content hash"] --> EdgeRS
+    EdgeRS["6. Create Release → SBOM edge"] --> EdgeSP
+    EdgeSP["7. Create SBOM → PURL edges<br/>with version metadata"] --> Response
+    Response["8. Return success response"]
+    
+    style Start fill:#e3f2fd
+    style Validate fill:#fff3bf
+    style Response fill:#51cf66
+```
 
 **Response:**
 
@@ -1054,10 +1047,18 @@ POST /api/v1/sync
 
 **Process:**
 
-1. Validate release exists
-2. Create or retrieve endpoint
-3. Create sync record with timestamp
-4. Handle idempotent updates (unique constraint)
+```mermaid
+flowchart TB
+    Start["Sync Request Received"] --> Validate
+    Validate["1. Validate release exists"] --> CreateEndpoint
+    CreateEndpoint["2. Create or retrieve endpoint"] --> CreateSync
+    CreateSync["3. Create sync record with timestamp"] --> Handle
+    Handle["4. Handle idempotent updates<br/>(unique constraint)"] --> Response
+    Response["5. Return success response"]
+    
+    style Start fill:#e3f2fd
+    style Response fill:#51cf66
+```
 
 ### 4. Vulnerability Queries
 
@@ -1071,10 +1072,18 @@ GET /api/v1/releases/{name}/{version}/cves
 
 **Graph Traversal:**
 
-```text
-Release → SBOM → (SBOM2PURL with version) → PURL → CVE
-                                                ↓
-                                          Filter by version match
+```mermaid
+flowchart LR
+    Release["Release"] --> SBOM["SBOM"]
+    SBOM -->|SBOM2PURL<br/>with version| PURL["PURL"]
+    PURL --> CVE["CVE"]
+    CVE --> Filter["Filter by<br/>version match"]
+    
+    style Release fill:#fff0e0
+    style SBOM fill:#69db7c
+    style PURL fill:#4dabf7
+    style CVE fill:#ff6b6b
+    style Filter fill:#ffd43b
 ```
 
 **Response:**
@@ -1110,12 +1119,20 @@ GET /api/v1/severity/{severity}/affected-releases
 
 **Graph Traversal (Optimized):**
 
-```text
-Release → SBOM → (SBOM2PURL with version) → PURL → CVE
-                                                      ↓
-                                    Filter: database_specific.severity_rating == "HIGH"
-                                                      ↓
-                                              Validate version match in Go
+```mermaid
+flowchart LR
+    Release["Release"] --> SBOM["SBOM"]
+    SBOM -->|SBOM2PURL<br/>with version| PURL["PURL"]
+    PURL --> CVE["CVE"]
+    CVE --> Filter1["Filter:<br/>database_specific<br/>.severity_rating<br/>== 'HIGH'"]
+    Filter1 --> Filter2["Validate<br/>version match<br/>in Go"]
+    
+    style Release fill:#fff0e0
+    style SBOM fill:#69db7c
+    style PURL fill:#4dabf7
+    style CVE fill:#ff6b6b
+    style Filter1 fill:#ffd43b
+    style Filter2 fill:#ffd43b
 ```
 
 **AQL Query (Simplified):**
@@ -1158,10 +1175,19 @@ GET /api/v1/severity/{severity}/affected-endpoints
 
 **Graph Traversal:**
 
-```text
-Release → SBOM → (SBOM2PURL with version) → PURL → CVE (filtered by severity_rating)
-   ↓
-Sync → Endpoint
+```mermaid
+flowchart TB
+    Release["Release"] --> SBOM["SBOM"]
+    SBOM -->|SBOM2PURL<br/>with version| PURL["PURL"]
+    PURL --> CVE["CVE<br/>(filtered by<br/>severity_rating)"]
+    Release --> Sync["Sync"]
+    Sync --> Endpoint["Endpoint"]
+    
+    style Release fill:#fff0e0
+    style SBOM fill:#69db7c
+    style PURL fill:#4dabf7
+    style CVE fill:#ff6b6b
+    style Endpoint fill:#cc5de8
 ```
 
 **Response:**
@@ -1783,11 +1809,21 @@ db.sbom2purl.ensureIndex({
 The system supports zero-downtime deployments through rolling updates:
 
 **Deployment Process:**
-1. New version is deployed alongside existing version
-2. Health checks verify new instances are ready
-3. Traffic is gradually shifted to new instances
-4. Old instances are drained and terminated
-5. Database migrations run automatically before deployment
+
+```mermaid
+flowchart LR
+    Step1["1. New version deployed<br/>alongside existing"] --> Step2
+    Step2["2. Health checks verify<br/>new instances ready"] --> Step3
+    Step3["3. Traffic gradually shifted<br/>to new instances"] --> Step4
+    Step4["4. Old instances drained<br/>and terminated"] --> Step5
+    Step5["5. Database migrations<br/>run automatically"]
+    
+    style Step1 fill:#e3f2fd
+    style Step2 fill:#fff3bf
+    style Step3 fill:#ffd43b
+    style Step4 fill:#69db7c
+    style Step5 fill:#51cf66
+```
 
 **Benefits:**
 - No maintenance window required
@@ -1886,6 +1922,31 @@ This Post-Deployment Vulnerability Remediation system provides comprehensive vis
 The hub-and-spoke architecture ensures scalability and performance, while the sync tracking mechanism provides the crucial link between code and production systems. The addition of pre-calculated CVSS scores and severity ratings enables efficient, real-time severity-based filtering and prioritization, with all API operations completing within 3 seconds to ensure optimal end-user experience. The rolling update deployment strategy ensures continuous availability, eliminating the need for maintenance windows while maintaining service quality.
 
 **Key Benefits:**
+
+```mermaid
+mindmap
+  root((Post-Deployment<br/>Vulnerability<br/>Remediation))
+    Performance
+      All API responses <3s
+      Indexed severity ratings
+      Millions of CVEs efficiently
+    Accuracy
+      Official CVSS specification
+      Validated library
+      Complete CVE coverage
+    Scalability
+      Linear edge growth
+      Hub-and-spoke architecture
+      Optimized queries
+    Availability
+      Rolling updates
+      99.9% uptime
+      Zero downtime deployments
+    Reliability
+      All CVEs have severity
+      Even missing data handled
+      Comprehensive tracking
+```
 
 - **Performance**: All API responses <3 seconds for optimal user experience
 - **Accuracy**: Uses official CVSS specification via validated library
