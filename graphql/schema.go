@@ -101,6 +101,45 @@ var SBOMType = graphql.NewObject(graphql.ObjectConfig{
 				return nil, nil
 			},
 		},
+		"dependency_count": &graphql.Field{
+			Type: graphql.Int,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				sbom, ok := p.Source.(model.SBOM)
+				if !ok {
+					return 0, nil
+				}
+
+				// Use AQL to get the length of components array
+				ctx := context.Background()
+				query := `
+					LET sbom = DOCUMENT(@sbomKey)
+					RETURN sbom.content.components != null ? LENGTH(sbom.content.components) : 0
+				`
+
+				cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+					BindVars: map[string]interface{}{
+						"sbomKey": sbom.Key,
+					},
+				})
+				if err != nil {
+					log.Printf("Error querying dependency_count: %v", err)
+					return 0, nil
+				}
+				defer cursor.Close()
+
+				var count int
+				if cursor.HasMore() {
+					_, err = cursor.ReadDocument(ctx, &count)
+					if err != nil {
+						log.Printf("Error reading dependency_count: %v", err)
+						return 0, nil
+					}
+					return count, nil
+				}
+
+				return 0, nil
+			},
+		},
 	},
 })
 
@@ -187,6 +226,47 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				return resolveReleaseVulnerabilities(release.Name, release.Version)
 			},
 		},
+		"dependency_count": &graphql.Field{
+			Type: graphql.Int,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				release, ok := p.Source.(model.ProjectRelease)
+				if !ok {
+					return 0, nil
+				}
+
+				ctx := context.Background()
+				query := `
+					FOR r IN release
+						FILTER r.name == @name && r.version == @version
+						FOR sbom IN 1..1 OUTBOUND r release2sbom
+							RETURN sbom.content.components != null ? LENGTH(sbom.content.components) : 0
+				`
+
+				cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+					BindVars: map[string]interface{}{
+						"name":    release.Name,
+						"version": release.Version,
+					},
+				})
+				if err != nil {
+					log.Printf("Error querying dependency_count: %v", err)
+					return 0, nil
+				}
+				defer cursor.Close()
+
+				var count int
+				if cursor.HasMore() {
+					_, err = cursor.ReadDocument(ctx, &count)
+					if err != nil {
+						log.Printf("Error reading dependency_count: %v", err)
+						return 0, nil
+					}
+					return count, nil
+				}
+
+				return 0, nil
+			},
+		},
 	},
 })
 
@@ -241,6 +321,54 @@ var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 		},
 		"project_type": &graphql.Field{
 			Type: graphql.String,
+		},
+		"dependency_count": &graphql.Field{
+			Type: graphql.Int,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				source, ok := p.Source.(map[string]interface{})
+				if !ok {
+					return 0, nil
+				}
+
+				releaseName, _ := source["release_name"].(string)
+				releaseVersion, _ := source["release_version"].(string)
+
+				if releaseName == "" || releaseVersion == "" {
+					return 0, nil
+				}
+
+				ctx := context.Background()
+				query := `
+					FOR r IN release
+						FILTER r.name == @name && r.version == @version
+						FOR sbom IN 1..1 OUTBOUND r release2sbom
+							RETURN sbom.content.components != null ? LENGTH(sbom.content.components) : 0
+				`
+
+				cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+					BindVars: map[string]interface{}{
+						"name":    releaseName,
+						"version": releaseVersion,
+					},
+				})
+				if err != nil {
+					log.Printf("Error querying dependency_count: %v", err)
+					return 0, nil
+				}
+				defer cursor.Close()
+
+				var count int
+				if cursor.HasMore() {
+					_, err = cursor.ReadDocument(ctx, &count)
+					if err != nil {
+						log.Printf("Error reading dependency_count: %v", err)
+						return 0, nil
+					}
+					return count, nil
+				}
+
+				return 0, nil
+			},
 		},
 	},
 })
@@ -308,6 +436,54 @@ var AffectedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 		},
 		"synced_at": &graphql.Field{
 			Type: graphql.String,
+		},
+		"dependency_count": &graphql.Field{
+			Type: graphql.Int,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				source, ok := p.Source.(map[string]interface{})
+				if !ok {
+					return 0, nil
+				}
+
+				releaseName, _ := source["release_name"].(string)
+				releaseVersion, _ := source["release_version"].(string)
+
+				if releaseName == "" || releaseVersion == "" {
+					return 0, nil
+				}
+
+				ctx := context.Background()
+				query := `
+					FOR r IN release
+						FILTER r.name == @name && r.version == @version
+						FOR sbom IN 1..1 OUTBOUND r release2sbom
+							RETURN sbom.content.components != null ? LENGTH(sbom.content.components) : 0
+				`
+
+				cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+					BindVars: map[string]interface{}{
+						"name":    releaseName,
+						"version": releaseVersion,
+					},
+				})
+				if err != nil {
+					log.Printf("Error querying dependency_count: %v", err)
+					return 0, nil
+				}
+				defer cursor.Close()
+
+				var count int
+				if cursor.HasMore() {
+					_, err = cursor.ReadDocument(ctx, &count)
+					if err != nil {
+						log.Printf("Error reading dependency_count: %v", err)
+						return 0, nil
+					}
+					return count, nil
+				}
+
+				return 0, nil
+			},
 		},
 	},
 })
@@ -459,116 +635,81 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 
 	log.Printf("Querying releases affected by %s severity", severity)
 
-	// Special case: NONE severity returns all releases without CVE filtering
-	// This is much faster as it skips all edge traversals and CVE lookups
+	var query string
+	
+	// Use separate AQL statements based on severity
 	if severityScore == 0.0 {
-		query := `
+		// Query without severity filter for NONE
+		query = `
 			FOR release IN release
-				RETURN {
-					cve_id: null,
-					cve_summary: null,
-					cve_details: null,
-					cve_severity_score: null,
-					cve_severity_rating: null,
-					cve_published: null,
-					cve_modified: null,
-					cve_aliases: [],
-					affected_data: null,
-					package: null,
-					version: null,
-					full_purl: null,
-					release_name: release.name,
-					release_version: release.version,
-					content_sha: release.contentsha,
-					project_type: release.projecttype
-				}
-		`
-
-		cursor, err := db.Database.Query(ctx, query, nil)
-		if err != nil {
-			return nil, err
-		}
-		defer cursor.Close()
-
-		type Candidate struct {
-			CveID             *string          `json:"cve_id"`
-			CveSummary        *string          `json:"cve_summary"`
-			CveDetails        *string          `json:"cve_details"`
-			CveSeverityScore  *float64         `json:"cve_severity_score"`
-			CveSeverityRating *string          `json:"cve_severity_rating"`
-			CvePublished      *string          `json:"cve_published"`
-			CveModified       *string          `json:"cve_modified"`
-			CveAliases        []string         `json:"cve_aliases"`
-			AffectedData      *models.Affected `json:"affected_data"`
-			Package           *string          `json:"package"`
-			Version           *string          `json:"version"`
-			FullPurl          *string          `json:"full_purl"`
-			ReleaseName       string           `json:"release_name"`
-			ReleaseVersion    string           `json:"release_version"`
-			ContentSha        string           `json:"content_sha"`
-			ProjectType       string           `json:"project_type"`
-		}
-
-		var affectedReleases []map[string]interface{}
-		seen := make(map[string]bool)
-
-		for cursor.HasMore() {
-			var candidate Candidate
-			_, err := cursor.ReadDocument(ctx, &candidate)
-			if err != nil {
-				continue
-			}
-
-			key := candidate.ReleaseName + ":" + candidate.ReleaseVersion
-			if seen[key] {
-				continue
-			}
-			seen[key] = true
-
-			affectedReleases = append(affectedReleases, map[string]interface{}{
-				"cve_id":           nil,
-				"summary":          nil,
-				"details":          nil,
-				"severity_score":   nil,
-				"severity_rating":  nil,
-				"published":        nil,
-				"modified":         nil,
-				"aliases":          []string{},
-				"package":          nil,
-				"affected_version": nil,
-				"full_purl":        nil,
-				"fixed_in":         []string{},
-				"release_name":     candidate.ReleaseName,
-				"release_version":  candidate.ReleaseVersion,
-				"content_sha":      candidate.ContentSha,
-				"project_type":     candidate.ProjectType,
-			})
-		}
-
-		return affectedReleases, nil
-	}
-
-	// Standard query for severity > NONE (with CVE filtering)
-	query := `
-		FOR release IN release
-			
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
 				
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
+				FOR sbom IN 1..1 OUTBOUND release release2sbom
 					
-					LET purl = DOCUMENT(sbomEdge._to)
-					FILTER purl != null
-					
-					LET packageVersion = sbomEdge.version
-					LET packageFullPurl = sbomEdge.full_purl
-					
-					FOR cveEdge IN cve2purl
-						FILTER cveEdge._to == purl._id
+					FOR sbomEdge IN sbom2purl
+						FILTER sbomEdge._from == sbom._id
 						
-						LET cve = DOCUMENT(cveEdge._from)
-						FILTER cve != null
-						FILTER cve.database_specific.cvss_base_score >= @severityScore
+						LET purl = DOCUMENT(sbomEdge._to)
+						FILTER purl != null
+						
+						LET packageVersion = sbomEdge.version
+						LET packageFullPurl = sbomEdge.full_purl
+						
+						FOR cveEdge IN cve2purl
+							FILTER cveEdge._to == purl._id
+							
+							LET cve = DOCUMENT(cveEdge._from)
+							FILTER cve != null
+							
+							FILTER cve.affected != null
+							FOR affected IN cve.affected
+								
+								LET cveBasePurl = affected.package.purl != null ? 
+									affected.package.purl : 
+									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+								
+								FILTER cveBasePurl == purl.purl
+								
+								RETURN {
+									cve_id: cve.id,
+									cve_summary: cve.summary,
+									cve_details: cve.details,
+									cve_severity_score: cve.database_specific.cvss_base_score,
+									cve_severity_rating: cve.database_specific.severity_rating,
+									cve_published: cve.published,
+									cve_modified: cve.modified,
+									cve_aliases: cve.aliases,
+									affected_data: affected,
+									package: purl.purl,
+									version: packageVersion,
+									full_purl: packageFullPurl,
+									release_name: release.name,
+									release_version: release.version,
+									content_sha: release.contentsha,
+									project_type: release.projecttype
+								}
+		`
+	} else {
+		// Query with severity filter for LOW, MEDIUM, HIGH, CRITICAL
+		query = `
+			FOR release IN release
+				
+				FOR sbom IN 1..1 OUTBOUND release release2sbom
+					
+					FOR sbomEdge IN sbom2purl
+						FILTER sbomEdge._from == sbom._id
+						
+						LET purl = DOCUMENT(sbomEdge._to)
+						FILTER purl != null
+						
+						LET packageVersion = sbomEdge.version
+						LET packageFullPurl = sbomEdge.full_purl
+						
+						FOR cveEdge IN cve2purl
+							FILTER cveEdge._to == purl._id
+							
+							LET cve = DOCUMENT(cveEdge._from)
+							FILTER cve != null
+							FILTER cve.database_specific.cvss_base_score >= @severityScore
 						
 						FILTER cve.affected != null
 						FOR affected IN cve.affected
@@ -597,13 +738,23 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 								content_sha: release.contentsha,
 								project_type: release.projecttype
 							}
-	`
+		`
+	}
 
-	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"severityScore": severityScore,
-		},
-	})
+	var cursor arangodb.Cursor
+	var err error
+	
+	if severityScore == 0.0 {
+		// No bind variables needed for NONE severity
+		cursor, err = db.Database.Query(ctx, query, nil)
+	} else {
+		// Bind severity score for other severities
+		cursor, err = db.Database.Query(ctx, query, &arangodb.QueryOptions{
+			BindVars: map[string]interface{}{
+				"severityScore": severityScore,
+			},
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -680,26 +831,92 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 
 	log.Printf("Querying endpoints affected by %s severity", severity)
 
-	query := `
-		FOR release IN release
-			
-			FOR sbom IN 1..1 OUTBOUND release release2sbom
+	var query string
+	
+	// Use separate AQL statements based on severity
+	if severityScore == 0.0 {
+		// Query without severity filter for NONE
+		query = `
+			FOR release IN release
 				
-				FOR sbomEdge IN sbom2purl
-					FILTER sbomEdge._from == sbom._id
+				FOR sbom IN 1..1 OUTBOUND release release2sbom
 					
-					LET purl = DOCUMENT(sbomEdge._to)
-					FILTER purl != null
-					
-					LET packageVersion = sbomEdge.version
-					LET packageFullPurl = sbomEdge.full_purl
-					
-					FOR cveEdge IN cve2purl
-						FILTER cveEdge._to == purl._id
+					FOR sbomEdge IN sbom2purl
+						FILTER sbomEdge._from == sbom._id
 						
-						LET cve = DOCUMENT(cveEdge._from)
-						FILTER cve != null
-						FILTER cve.database_specific.cvss_base_score >= @severityScore
+						LET purl = DOCUMENT(sbomEdge._to)
+						FILTER purl != null
+						
+						LET packageVersion = sbomEdge.version
+						LET packageFullPurl = sbomEdge.full_purl
+						
+						FOR cveEdge IN cve2purl
+							FILTER cveEdge._to == purl._id
+							
+							LET cve = DOCUMENT(cveEdge._from)
+							FILTER cve != null
+							
+							FILTER cve.affected != null
+							FOR affected IN cve.affected
+								
+								LET cveBasePurl = affected.package.purl != null ? 
+									affected.package.purl : 
+									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+								
+								FILTER cveBasePurl == purl.purl
+								
+								FOR sync IN sync
+									FILTER sync.release_name == release.name 
+									   AND sync.release_version == release.version
+									
+									FOR endpoint IN endpoint
+										FILTER endpoint.name == sync.endpoint_name
+										
+										RETURN {
+											cve_id: cve.id,
+											cve_summary: cve.summary,
+											cve_details: cve.details,
+											cve_severity_score: cve.database_specific.cvss_base_score,
+											cve_severity_rating: cve.database_specific.severity_rating,
+											cve_published: cve.published,
+											cve_modified: cve.modified,
+											cve_aliases: cve.aliases,
+											affected_data: affected,
+											package: purl.purl,
+											version: packageVersion,
+											full_purl: packageFullPurl,
+											release_name: release.name,
+											release_version: release.version,
+											content_sha: release.contentsha,
+											project_type: release.projecttype,
+											endpoint_name: endpoint.name,
+											endpoint_type: endpoint.endpoint_type,
+											environment: endpoint.environment,
+											synced_at: sync.synced_at
+										}
+		`
+	} else {
+		// Query with severity filter for LOW, MEDIUM, HIGH, CRITICAL
+		query = `
+			FOR release IN release
+				
+				FOR sbom IN 1..1 OUTBOUND release release2sbom
+					
+					FOR sbomEdge IN sbom2purl
+						FILTER sbomEdge._from == sbom._id
+						
+						LET purl = DOCUMENT(sbomEdge._to)
+						FILTER purl != null
+						
+						LET packageVersion = sbomEdge.version
+						LET packageFullPurl = sbomEdge.full_purl
+						
+						FOR cveEdge IN cve2purl
+							FILTER cveEdge._to == purl._id
+							
+							LET cve = DOCUMENT(cveEdge._from)
+							FILTER cve != null
+							FILTER cve.database_specific.cvss_base_score >= @severityScore
 						
 						FILTER cve.affected != null
 						FOR affected IN cve.affected
@@ -740,12 +957,22 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 										synced_at: sync.synced_at
 									}
 	`
+	}
 
-	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
-		BindVars: map[string]interface{}{
-			"severityScore": severityScore,
-		},
-	})
+	var cursor arangodb.Cursor
+	var err error
+	
+	if severityScore == 0.0 {
+		// No bind variables needed for NONE severity
+		cursor, err = db.Database.Query(ctx, query, nil)
+	} else {
+		// Bind severity score for other severities
+		cursor, err = db.Database.Query(ctx, query, &arangodb.QueryOptions{
+			BindVars: map[string]interface{}{
+				"severityScore": severityScore,
+			},
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
