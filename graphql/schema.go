@@ -695,7 +695,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 						
 						// Return one result per CVE match, or one result with null CVE data if no matches
 						FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
-							RETURN {
+							LET result = {
 								cve_id: cveMatch != null ? cveMatch.cve_id : null,
 								cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
 								cve_details: cveMatch != null ? cveMatch.cve_details : null,
@@ -714,6 +714,8 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 								project_type: release.projecttype,
 								openssf_scorecard_score: release.openssf_scorecard_score
 							}
+							SORT result.cve_severity_score DESC
+							RETURN result
 		`
 	} else {
 		// Query with severity filter for LOW, MEDIUM, HIGH, CRITICAL
@@ -747,7 +749,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 							
 							FILTER cveBasePurl == purl.purl
 							
-							RETURN {
+							LET result = {
 								cve_id: cve.id,
 								cve_summary: cve.summary,
 								cve_details: cve.details,
@@ -766,6 +768,8 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 								project_type: release.projecttype,
 								openssf_scorecard_score: release.openssf_scorecard_score
 							}
+							SORT result.cve_severity_score DESC
+							RETURN result
 		`
 	}
 
@@ -929,7 +933,7 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 								FOR endpoint IN endpoint
 									FILTER endpoint.name == sync.endpoint_name
 									
-									RETURN {
+									LET result = {
 										cve_id: cveMatch != null ? cveMatch.cve_id : null,
 										cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
 										cve_details: cveMatch != null ? cveMatch.cve_details : null,
@@ -953,6 +957,8 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 										synced_at: sync.synced_at,
 										openssf_scorecard_score: release.openssf_scorecard_score
 									}
+									SORT result.cve_severity_score DESC
+									RETURN result
 		`
 	} else {
 		// Query with severity filter for LOW, MEDIUM, HIGH, CRITICAL
@@ -993,7 +999,7 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 								FOR endpoint IN endpoint
 									FILTER endpoint.name == sync.endpoint_name
 									
-									RETURN {
+									LET result = {
 										cve_id: cve.id,
 										cve_summary: cve.summary,
 										cve_details: cve.details,
@@ -1015,6 +1021,8 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 										environment: endpoint.environment,
 										synced_at: sync.synced_at
 									}
+										SORT result.cve_severity_score DESC
+										RETURN result
 	`
 	}
 
