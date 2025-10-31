@@ -177,6 +177,9 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 		"docker_sha": &graphql.Field{
 			Type: graphql.String,
 		},
+		"openssf_score": &graphql.Field{
+			Type: graphql.Float,
+		},
 		"sbom": &graphql.Field{
 			Type: SBOMType,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -322,6 +325,9 @@ var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 		"project_type": &graphql.Field{
 			Type: graphql.String,
 		},
+		"openssf_scorecard_score": &graphql.Field{
+			Type: graphql.Float,
+		},
 		"dependency_count": &graphql.Field{
 			Type: graphql.Int,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -436,6 +442,9 @@ var AffectedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 		},
 		"synced_at": &graphql.Field{
 			Type: graphql.String,
+		},
+		"openssf_scorecard_score": &graphql.Field{
+			Type: graphql.Float,
 		},
 		"dependency_count": &graphql.Field{
 			Type: graphql.Int,
@@ -654,39 +663,57 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 						LET packageVersion = sbomEdge.version
 						LET packageFullPurl = sbomEdge.full_purl
 						
-						FOR cveEdge IN cve2purl
-							FILTER cveEdge._to == purl._id
-							
-							LET cve = DOCUMENT(cveEdge._from)
-							FILTER cve != null
-							
-							FILTER cve.affected != null
-							FOR affected IN cve.affected
+						// Left outer join with CVEs - include packages even without CVEs
+						LET cveMatches = (
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
 								
-								LET cveBasePurl = affected.package.purl != null ? 
-									affected.package.purl : 
-									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								FILTER cve.affected != null
 								
-								FILTER cveBasePurl == purl.purl
-								
-								RETURN {
-									cve_id: cve.id,
-									cve_summary: cve.summary,
-									cve_details: cve.details,
-									cve_severity_score: cve.database_specific.cvss_base_score,
-									cve_severity_rating: cve.database_specific.severity_rating,
-									cve_published: cve.published,
-									cve_modified: cve.modified,
-									cve_aliases: cve.aliases,
-									affected_data: affected,
-									package: purl.purl,
-									version: packageVersion,
-									full_purl: packageFullPurl,
-									release_name: release.name,
-									release_version: release.version,
-									content_sha: release.contentsha,
-									project_type: release.projecttype
-								}
+								FOR affected IN cve.affected
+									
+									LET cveBasePurl = affected.package.purl != null ? 
+										affected.package.purl : 
+										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+									
+									FILTER cveBasePurl == purl.purl
+									
+									RETURN {
+										cve_id: cve.id,
+										cve_summary: cve.summary,
+										cve_details: cve.details,
+										cve_severity_score: cve.database_specific.cvss_base_score,
+										cve_severity_rating: cve.database_specific.severity_rating,
+										cve_published: cve.published,
+										cve_modified: cve.modified,
+										cve_aliases: cve.aliases,
+										affected_data: affected
+									}
+						)
+						
+						// Return one result per CVE match, or one result with null CVE data if no matches
+						FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
+							RETURN {
+								cve_id: cveMatch != null ? cveMatch.cve_id : null,
+								cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
+								cve_details: cveMatch != null ? cveMatch.cve_details : null,
+								cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
+								cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
+								cve_published: cveMatch != null ? cveMatch.cve_published : null,
+								cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
+								cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
+								affected_data: cveMatch != null ? cveMatch.affected_data : null,
+								package: purl.purl,
+								version: packageVersion,
+								full_purl: packageFullPurl,
+								release_name: release.name,
+								release_version: release.version,
+								content_sha: release.contentsha,
+								project_type: release.projecttype,
+								openssf_scorecard_score: release.openssf_scorecard_score
+							}
 		`
 	} else {
 		// Query with severity filter for LOW, MEDIUM, HIGH, CRITICAL
@@ -736,7 +763,8 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 								release_name: release.name,
 								release_version: release.version,
 								content_sha: release.contentsha,
-								project_type: release.projecttype
+								project_type: release.projecttype,
+								openssf_scorecard_score: release.openssf_scorecard_score
 							}
 		`
 	}
@@ -761,22 +789,23 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 	defer cursor.Close()
 
 	type Candidate struct {
-		CveID             string          `json:"cve_id"`
-		CveSummary        string          `json:"cve_summary"`
-		CveDetails        string          `json:"cve_details"`
-		CveSeverityScore  float64         `json:"cve_severity_score"`
-		CveSeverityRating string          `json:"cve_severity_rating"`
-		CvePublished      string          `json:"cve_published"`
-		CveModified       string          `json:"cve_modified"`
-		CveAliases        []string        `json:"cve_aliases"`
-		AffectedData      models.Affected `json:"affected_data"`
-		Package           string          `json:"package"`
-		Version           string          `json:"version"`
-		FullPurl          string          `json:"full_purl"`
-		ReleaseName       string          `json:"release_name"`
-		ReleaseVersion    string          `json:"release_version"`
-		ContentSha        string          `json:"content_sha"`
-		ProjectType       string          `json:"project_type"`
+		CveID             *string          `json:"cve_id"`
+		CveSummary        *string          `json:"cve_summary"`
+		CveDetails        *string          `json:"cve_details"`
+		CveSeverityScore  *float64         `json:"cve_severity_score"`
+		CveSeverityRating *string          `json:"cve_severity_rating"`
+		CvePublished      *string          `json:"cve_published"`
+		CveModified       *string          `json:"cve_modified"`
+		CveAliases        []string         `json:"cve_aliases"`
+		AffectedData      *models.Affected `json:"affected_data"`
+		Package           string           `json:"package"`
+		Version           string           `json:"version"`
+		FullPurl          string           `json:"full_purl"`
+		ReleaseName       string           `json:"release_name"`
+		ReleaseVersion    string           `json:"release_version"`
+		ContentSha             string           `json:"content_sha"`
+		ProjectType            string           `json:"project_type"`
+		OpenssfScorecardScore  *float64         `json:"openssf_scorecard_score"`
 	}
 
 	var affectedReleases []map[string]interface{}
@@ -789,17 +818,26 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 			continue
 		}
 
-		if !util.IsVersionAffected(candidate.Version, candidate.AffectedData) {
+		// Skip version check if there's no CVE data (releases without vulnerabilities)
+		if candidate.AffectedData != nil && !util.IsVersionAffected(candidate.Version, *candidate.AffectedData) {
 			continue
 		}
 
-		key := candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version + ":" + candidate.CveID
+		// Build key - use empty string for CveID if no CVE
+		cveID := ""
+		if candidate.CveID != nil {
+			cveID = *candidate.CveID
+		}
+		key := candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version + ":" + cveID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 
-		fixedVersions := extractFixedVersions(candidate.AffectedData)
+		var fixedVersions []string
+		if candidate.AffectedData != nil {
+			fixedVersions = extractFixedVersions(*candidate.AffectedData)
+		}
 
 		affectedReleases = append(affectedReleases, map[string]interface{}{
 			"cve_id":           candidate.CveID,
@@ -815,9 +853,10 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 			"full_purl":        candidate.FullPurl,
 			"fixed_in":         fixedVersions,
 			"release_name":     candidate.ReleaseName,
-			"release_version":  candidate.ReleaseVersion,
-			"content_sha":      candidate.ContentSha,
-			"project_type":     candidate.ProjectType,
+			"release_version":         candidate.ReleaseVersion,
+			"content_sha":             candidate.ContentSha,
+			"project_type":            candidate.ProjectType,
+			"openssf_scorecard_score": candidate.OpenssfScorecardScore,
 		})
 	}
 
@@ -850,50 +889,70 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 						LET packageVersion = sbomEdge.version
 						LET packageFullPurl = sbomEdge.full_purl
 						
-						FOR cveEdge IN cve2purl
-							FILTER cveEdge._to == purl._id
-							
-							LET cve = DOCUMENT(cveEdge._from)
-							FILTER cve != null
-							
-							FILTER cve.affected != null
-							FOR affected IN cve.affected
+						// Left outer join with CVEs - include packages even without CVEs
+						LET cveMatches = (
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
 								
-								LET cveBasePurl = affected.package.purl != null ? 
-									affected.package.purl : 
-									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								FILTER cve.affected != null
 								
-								FILTER cveBasePurl == purl.purl
-								
-								FOR sync IN sync
-									FILTER sync.release_name == release.name 
-									   AND sync.release_version == release.version
+								FOR affected IN cve.affected
 									
-									FOR endpoint IN endpoint
-										FILTER endpoint.name == sync.endpoint_name
-										
-										RETURN {
-											cve_id: cve.id,
-											cve_summary: cve.summary,
-											cve_details: cve.details,
-											cve_severity_score: cve.database_specific.cvss_base_score,
-											cve_severity_rating: cve.database_specific.severity_rating,
-											cve_published: cve.published,
-											cve_modified: cve.modified,
-											cve_aliases: cve.aliases,
-											affected_data: affected,
-											package: purl.purl,
-											version: packageVersion,
-											full_purl: packageFullPurl,
-											release_name: release.name,
-											release_version: release.version,
-											content_sha: release.contentsha,
-											project_type: release.projecttype,
-											endpoint_name: endpoint.name,
-											endpoint_type: endpoint.endpoint_type,
-											environment: endpoint.environment,
-											synced_at: sync.synced_at
-										}
+									LET cveBasePurl = affected.package.purl != null ? 
+										affected.package.purl : 
+										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+									
+									FILTER cveBasePurl == purl.purl
+									
+									RETURN {
+										cve_id: cve.id,
+										cve_summary: cve.summary,
+										cve_details: cve.details,
+										cve_severity_score: cve.database_specific.cvss_base_score,
+										cve_severity_rating: cve.database_specific.severity_rating,
+										cve_published: cve.published,
+										cve_modified: cve.modified,
+										cve_aliases: cve.aliases,
+										affected_data: affected
+									}
+						)
+						
+						// Return one result per CVE match, or one result with null CVE data if no matches
+						FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
+							
+							FOR sync IN sync
+								FILTER sync.release_name == release.name 
+								   AND sync.release_version == release.version
+								
+								FOR endpoint IN endpoint
+									FILTER endpoint.name == sync.endpoint_name
+									
+									RETURN {
+										cve_id: cveMatch != null ? cveMatch.cve_id : null,
+										cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
+										cve_details: cveMatch != null ? cveMatch.cve_details : null,
+										cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
+										cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
+										cve_published: cveMatch != null ? cveMatch.cve_published : null,
+										cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
+										cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
+										affected_data: cveMatch != null ? cveMatch.affected_data : null,
+										package: purl.purl,
+										version: packageVersion,
+										full_purl: packageFullPurl,
+										release_name: release.name,
+										release_version: release.version,
+										content_sha: release.contentsha,
+										project_type: release.projecttype,
+										openssf_scorecard_score: release.openssf_scorecard_score,
+										endpoint_name: endpoint.name,
+										endpoint_type: endpoint.endpoint_type,
+										environment: endpoint.environment,
+										synced_at: sync.synced_at,
+										openssf_scorecard_score: release.openssf_scorecard_score
+									}
 		`
 	} else {
 		// Query with severity filter for LOW, MEDIUM, HIGH, CRITICAL
@@ -979,26 +1038,27 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 	defer cursor.Close()
 
 	type Candidate struct {
-		CveID             string          `json:"cve_id"`
-		CveSummary        string          `json:"cve_summary"`
-		CveDetails        string          `json:"cve_details"`
-		CveSeverityScore  float64         `json:"cve_severity_score"`
-		CveSeverityRating string          `json:"cve_severity_rating"`
-		CvePublished      string          `json:"cve_published"`
-		CveModified       string          `json:"cve_modified"`
-		CveAliases        []string        `json:"cve_aliases"`
-		AffectedData      models.Affected `json:"affected_data"`
-		Package           string          `json:"package"`
-		Version           string          `json:"version"`
-		FullPurl          string          `json:"full_purl"`
-		ReleaseName       string          `json:"release_name"`
-		ReleaseVersion    string          `json:"release_version"`
-		ContentSha        string          `json:"content_sha"`
-		ProjectType       string          `json:"project_type"`
-		EndpointName      string          `json:"endpoint_name"`
-		EndpointType      string          `json:"endpoint_type"`
-		Environment       string          `json:"environment"`
-		SyncedAt          time.Time       `json:"synced_at"`
+		CveID             *string          `json:"cve_id"`
+		CveSummary        *string          `json:"cve_summary"`
+		CveDetails        *string          `json:"cve_details"`
+		CveSeverityScore  *float64         `json:"cve_severity_score"`
+		CveSeverityRating *string          `json:"cve_severity_rating"`
+		CvePublished      *string          `json:"cve_published"`
+		CveModified       *string          `json:"cve_modified"`
+		CveAliases        []string         `json:"cve_aliases"`
+		AffectedData      *models.Affected `json:"affected_data"`
+		Package           string           `json:"package"`
+		Version           string           `json:"version"`
+		FullPurl          string           `json:"full_purl"`
+		ReleaseName       string           `json:"release_name"`
+		ReleaseVersion    string           `json:"release_version"`
+		ContentSha        string           `json:"content_sha"`
+		ProjectType            string           `json:"project_type"`
+		EndpointName           string           `json:"endpoint_name"`
+		EndpointType           string           `json:"endpoint_type"`
+		Environment            string           `json:"environment"`
+		SyncedAt               time.Time        `json:"synced_at"`
+		OpenssfScorecardScore  *float64         `json:"openssf_scorecard_score"`
 	}
 
 	var affectedEndpoints []map[string]interface{}
@@ -1011,17 +1071,26 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 			continue
 		}
 
-		if !util.IsVersionAffected(candidate.Version, candidate.AffectedData) {
+		// Skip version check if there's no CVE data (releases without vulnerabilities)
+		if candidate.AffectedData != nil && !util.IsVersionAffected(candidate.Version, *candidate.AffectedData) {
 			continue
 		}
 
-		key := candidate.EndpointName + ":" + candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version + ":" + candidate.CveID
+		// Build key - use empty string for CveID if no CVE
+		cveID := ""
+		if candidate.CveID != nil {
+			cveID = *candidate.CveID
+		}
+		key := candidate.EndpointName + ":" + candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version + ":" + cveID
 		if seen[key] {
 			continue
 		}
 		seen[key] = true
 
-		fixedVersions := extractFixedVersions(candidate.AffectedData)
+		var fixedVersions []string
+		if candidate.AffectedData != nil {
+			fixedVersions = extractFixedVersions(*candidate.AffectedData)
+		}
 
 		affectedEndpoints = append(affectedEndpoints, map[string]interface{}{
 			"cve_id":           candidate.CveID,
@@ -1040,10 +1109,11 @@ func resolveAffectedEndpoints(severity string) ([]map[string]interface{}, error)
 			"release_version":  candidate.ReleaseVersion,
 			"content_sha":      candidate.ContentSha,
 			"project_type":     candidate.ProjectType,
-			"endpoint_name":    candidate.EndpointName,
-			"endpoint_type":    candidate.EndpointType,
-			"environment":      candidate.Environment,
-			"synced_at":        candidate.SyncedAt.Format(time.RFC3339),
+			"endpoint_name":           candidate.EndpointName,
+			"endpoint_type":           candidate.EndpointType,
+			"environment":             candidate.Environment,
+			"synced_at":               candidate.SyncedAt.Format(time.RFC3339),
+			"openssf_scorecard_score": candidate.OpenssfScorecardScore,
 		})
 	}
 
