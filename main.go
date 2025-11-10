@@ -9,6 +9,7 @@ import (
 	"log"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/gofiber/fiber/v2"
@@ -814,7 +815,9 @@ func main() {
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		AppName: "CVE2Release-Tracker API v1.0",
+		AppName:     "CVE2Release-Tracker API v1.0",
+		BodyLimit:   50 * 1024 * 1024, // 50MB limit for SBOM uploads
+		ReadTimeout: time.Second * 60, // 60 second read timeout for large uploads
 	})
 
 	// Middleware
