@@ -222,8 +222,8 @@ func InitializeDatabase() DBConnection {
 		{Collection: "cve", IdxName: "package_purl", IdxField: "affected[*].package.purl"},
 		{Collection: "cve", IdxName: "cve_osv_id", IdxField: "osv.id"},
 		{Collection: "cve", IdxName: "cve_id", IdxField: "id"},
-		{Collection: "cve", IdxName: "cve_severity_rating", IdxField: "database_specific.severity_rating"}, // NEW
-		{Collection: "cve", IdxName: "cve_severity_score", IdxField: "database_specific.cvss_base_score"},  // NEW
+		{Collection: "cve", IdxName: "cve_severity_rating", IdxField: "database_specific.severity_rating"},
+		{Collection: "cve", IdxName: "cve_severity_score", IdxField: "database_specific.cvss_base_score"},
 
 		// SBOM collection indexes
 		{Collection: "sbom", IdxName: "sbom_contentsha", IdxField: "contentsha"},
@@ -248,13 +248,21 @@ func InitializeDatabase() DBConnection {
 		{Collection: "sync", IdxName: "sync_synced_at", IdxField: "synced_at"},
 
 		// Edge collection indexes for optimized traversals
+		// CRITICAL: These indexes enable O(log n) lookups in hub-spoke queries with 400K+ CVEs
+		
+		// release2sbom indexes - for validating release existence
 		{Collection: "release2sbom", IdxName: "release2sbom_from", IdxField: "_from"},
 		{Collection: "release2sbom", IdxName: "release2sbom_to", IdxField: "_to"},
+		
+		// sbom2purl indexes - starting point for vulnerability queries (10K edges vs 400K CVEs)
 		{Collection: "sbom2purl", IdxName: "sbom2purl_from", IdxField: "_from"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_to", IdxField: "_to"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_version", IdxField: "version"},
+		
+		// cve2purl indexes - THE MOST CRITICAL for 400K CVE performance
+		// The _to index enables O(log n) CVE lookups per PURL instead of O(n) scans
 		{Collection: "cve2purl", IdxName: "cve2purl_from", IdxField: "_from"},
-		{Collection: "cve2purl", IdxName: "cve2purl_to", IdxField: "_to"},
+		{Collection: "cve2purl", IdxName: "cve2purl_to", IdxField: "_to"}, // <-- CRITICAL for resolveVulnerabilities
 	}
 
 	for _, idx := range idxList {
@@ -281,6 +289,8 @@ func InitializeDatabase() DBConnection {
 			_, _, err = collections[idx.Collection].EnsurePersistentIndex(ctx, []string{idx.IdxField}, &indexOptions)
 			if err != nil {
 				logger.Sugar().Fatalln("Error creating index:", err)
+			} else {
+				logger.Sugar().Infof("Created index: %s on %s.%s", idx.IdxName, idx.Collection, idx.IdxField)
 			}
 		}
 	}
@@ -309,6 +319,8 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["release"].EnsurePersistentIndex(ctx, []string{"name", "version"}, &compositeIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on release", releaseNameVersionIdx)
 		}
 	}
 
@@ -332,6 +344,8 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["sbom2purl"].EnsurePersistentIndex(ctx, []string{"_to", "version"}, &compositeIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on sbom2purl", sbom2purlToVersionIdx)
 		}
 	}
 
@@ -355,6 +369,8 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["sync"].EnsurePersistentIndex(ctx, []string{"release_name", "release_version"}, &compositeIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on sync", syncReleaseIdx)
 		}
 	}
 
@@ -379,6 +395,8 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["sync"].EnsurePersistentIndex(ctx, []string{"release_name", "release_version", "endpoint_name"}, &uniqueCompositeIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating unique composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created unique composite index: %s on sync", syncUniqueIdx)
 		}
 	}
 
@@ -403,6 +421,8 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["endpoint"].EnsurePersistentIndex(ctx, []string{"name"}, &uniqueIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating unique index on endpoint name:", err)
+		} else {
+			logger.Sugar().Infof("Created unique index: %s on endpoint", endpointUniqueIdx)
 		}
 	}
 
@@ -427,6 +447,8 @@ func InitializeDatabase() DBConnection {
 		_, _, err = collections["purl"].EnsurePersistentIndex(ctx, []string{"purl"}, &uniqueIdxOptions)
 		if err != nil {
 			logger.Sugar().Fatalln("Error creating unique index on purl:", err)
+		} else {
+			logger.Sugar().Infof("Created unique index: %s on purl", purlUniqueIdx)
 		}
 	}
 
@@ -436,6 +458,8 @@ func InitializeDatabase() DBConnection {
 		Database:    db,
 		Collections: collections,
 	}
+
+	logger.Sugar().Infof("Database initialization complete with optimized indexes for 400K+ CVE performance")
 
 	return dbConnection
 }
