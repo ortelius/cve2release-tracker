@@ -247,13 +247,20 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 					LET purl = DOCUMENT(purlEdge._to)
 					FILTER purl != null
 					
-					FOR cveEdge IN cve2purl
-						FILTER cveEdge._to == purl._id
-						LET cve = DOCUMENT(cveEdge._from)
+					FOR cve IN 1..1 INBOUND purl cve2purl
 						FILTER cve != null
-						FILTER cve.database_specific != null
+						FILTER cve.affected != null
 						
-						FOR affected IN cve.affected != null ? cve.affected : []
+						// Default missing scores to 0.1
+						LET severity_score = cve.database_specific != null && cve.database_specific.cvss_base_score != null ? 
+							cve.database_specific.cvss_base_score : 0.1
+						
+						LET severity_rating = cve.database_specific != null && cve.database_specific.severity_rating != null ?
+							cve.database_specific.severity_rating : "LOW"
+						
+						FOR affected IN cve.affected
+							FILTER affected != null
+							FILTER affected.package != null
 							LET cveBasePurl = affected.package.purl != null ? 
 								affected.package.purl : 
 								CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
@@ -264,8 +271,8 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 								summary: cve.summary,
 								details: cve.details,
 								severity: cve.severity,
-								severity_score: cve.database_specific.cvss_base_score,
-								severity_rating: cve.database_specific.severity_rating,
+								severity_score: severity_score,
+								severity_rating: severity_rating,
 								published: cve.published,
 								modified: cve.modified,
 								aliases: cve.aliases,
@@ -793,15 +800,15 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 			COLLECT 
 				cve_id = vuln.cve_id,
 				package = vuln.package,
-				affected_version = vuln.affected_version,
-				full_purl = vuln.full_purl,
-				summary = vuln.summary,
-				severity_score = vuln.severity_score,
-				severity_rating = vuln.severity_rating,
-				fixed_in = vuln.fixed_in,
-				affected_data = vuln.affected_data
+				affected_version = vuln.affected_version
 			AGGREGATE 
-				releaseList = UNIQUE(CONCAT(vuln.release_name, ":", vuln.release_version))
+				summaries = UNIQUE(vuln.summary),
+				severity_scores = UNIQUE(vuln.severity_score),
+				severity_ratings = UNIQUE(vuln.severity_rating),
+				releaseList = UNIQUE(CONCAT(vuln.release_name, ":", vuln.release_version)),
+				full_purls = UNIQUE(vuln.full_purl),
+				all_fixed_in = UNIQUE(vuln.fixed_in),
+				all_affected_data = UNIQUE(vuln.affected_data)
 			
 			LET endpointCount = LENGTH(
 				FOR rel_str IN releaseList
@@ -812,21 +819,24 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 						RETURN 1
 			)
 			
-			SORT severity_score DESC
+			// Use the highest severity score for sorting when there are variations
+			LET max_severity_score = MAX(severity_scores)
+			
+			SORT max_severity_score DESC
 			LIMIT @limit
 			
 			RETURN {
 				cve_id: cve_id,
-				summary: summary != null ? summary : "",
-				severity_score: severity_score,
-				severity_rating: severity_rating != null ? severity_rating : "UNKNOWN",
+				summary: FIRST(summaries) != null ? FIRST(summaries) : "",
+				severity_score: max_severity_score,
+				severity_rating: FIRST(severity_ratings) != null ? FIRST(severity_ratings) : "UNKNOWN",
 				package: package,
 				affected_version: affected_version,
-				full_purl: full_purl,
-				fixed_in: fixed_in,
+				full_purl: FIRST(full_purls),
+				fixed_in: FIRST(all_fixed_in),
 				affected_releases: LENGTH(releaseList),
 				affected_endpoints: endpointCount,
-				affected_data: affected_data
+				affected_data: FIRST(all_affected_data)
 			}
 	`
 
