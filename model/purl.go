@@ -1,3 +1,5 @@
+// Package model defines the data structures used by the CVE2Release-Tracker,
+// including releases, SBOMs, and endpoints.
 package model
 
 // PURL represents a package URL (base form without version)

@@ -1,4 +1,5 @@
-// Package util provides utility functions for import/export operations in the Ortelius CLI.
+// Package util provides utility functions for working with Package URLs (PURLs),
+// version comparisons for vulnerability checking, and extracting metadata from the environment.
 package util
 
 import (
@@ -442,7 +443,7 @@ func isVersionInRangeString(version string, vrange models.Range) bool {
 	return true
 }
 
-// getSeverityScore returns the lowest CVSS base score for a given severity rating.
+// GetSeverityScore returns the lowest CVSS base score threshold for a given severity rating.
 func GetSeverityScore(severity string) float64 {
 	switch strings.ToUpper(strings.TrimSpace(severity)) {
 	case "NONE":

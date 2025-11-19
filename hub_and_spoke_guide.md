@@ -21,6 +21,7 @@ The hub-and-spoke architecture is a graph database design pattern that uses cent
 ### Why Use It?
 
 In vulnerability management, we need to connect:
+
 - **Thousands of CVEs** (vulnerabilities)
 - **Millions of package references** (in SBOMs)
 - **Hundreds of thousands of releases** (software versions)
@@ -32,13 +33,15 @@ Direct connections would create billions of edges and make queries impossibly sl
 
 **Business Question**: "Which of our production systems are affected by CVE-2024-1234?"
 
-**Without Hub Architecture**: 
+**Without Hub Architecture**:
+
 - Must check every SBOM for the vulnerable package
 - Must match every SBOM against the CVE's version range
 - Query time: Minutes to hours
 - Storage: Gigabytes of duplicate relationships
 
 **With Hub Architecture**:
+
 - CVE → PURL hub → SBOMs with version filtering
 - Single graph traversal with indexed lookups
 - Query time: Milliseconds to seconds
@@ -65,7 +68,8 @@ graph LR
     style H3 fill:#4dabf7
 ```
 
-**Purpose**: 
+**Purpose**:
+
 - Central connection point for all references to a package
 - Enables version-agnostic queries
 - Reduces node duplication
@@ -97,6 +101,7 @@ graph LR
 **Critical Design Element**: Version information stored on edges, not nodes
 
 **SBOM2PURL Edge**:
+
 ```json
 {
   "_from": "sbom/12345",
@@ -230,6 +235,7 @@ flowchart TB
 ```
 
 **AQL (ArangoDB Query Language)**:
+
 ```aql
 FOR cve IN cve
   FILTER cve.id == "CVE-2024-1234"
@@ -288,6 +294,7 @@ flowchart TB
 ```
 
 **AQL**:
+
 ```aql
 FOR release IN release
   FOR sbom IN OUTBOUND release release2sbom
@@ -325,6 +332,7 @@ FOR release IN release
 ```
 
 **Optimization Points:**
+
 - `severity_rating` field is indexed for fast filtering
 - `DISTINCT` eliminates duplicate results
 - `FILTER` clauses reduce data early in traversal
@@ -351,6 +359,7 @@ flowchart LR
 ```
 
 **AQL**:
+
 ```aql
 FOR release IN release
   FILTER release.name == "frontend-app"
@@ -394,6 +403,7 @@ flowchart TB
 ```
 
 **AQL**:
+
 ```aql
 FOR sync IN sync
   FILTER sync.endpoint_name == "prod-k8s-us-east"
@@ -426,6 +436,7 @@ FOR sync IN sync
 ### ArangoDB Collections
 
 **Document Collections**:
+
 ```javascript
 db._create("cve");        // CVE vulnerability data
 db._create("purl");       // Package URL hubs
@@ -436,6 +447,7 @@ db._create("sync");       // Deployment records
 ```
 
 **Edge Collections**:
+
 ```javascript
 db._createEdgeCollection("cve2purl");      // CVE → PURL
 db._createEdgeCollection("sbom2purl");     // SBOM → PURL
@@ -531,6 +543,7 @@ flowchart LR
 ### PURL Generation
 
 **From CVE Data (OSV format)**:
+
 ```go
 // Extract PURL from CVE affected package
 func extractBasePURL(affected models.Affected) string {
@@ -550,6 +563,7 @@ func extractBasePURL(affected models.Affected) string {
 ```
 
 **From SBOM Components (CycloneDX)**:
+
 ```go
 // Extract PURL from SBOM component
 func extractPURLFromComponent(component map[string]interface{}) (string, string) {
@@ -701,11 +715,13 @@ flowchart TB
 ```
 
 **Without Hub Architecture**:
+
 - N CVEs × M SBOMs = N×M direct edges
 - Example: 1,000 CVEs × 10,000 SBOMs = 10,000,000 edges
 - Storage: ~1 GB for edges alone
 
 **With Hub Architecture**:
+
 - N CVEs → P PURLs + M SBOMs → P PURLs = N+M edges
 - Example: 1,000 + 10,000 = 11,000 edges
 - Storage: ~10 MB for edges
@@ -713,7 +729,7 @@ flowchart TB
 
 ### Time Complexity
 
-**Query: Find all releases affected by a CVE**
+#### Query: Find all releases affected by a CVE
 
 ```mermaid
 flowchart TB
@@ -740,13 +756,15 @@ flowchart TB
 ```
 
 Without Hub:
-```
+
+```text
 O(N) where N = number of SBOMs
 Must check every SBOM for CVE reference
 ```
 
 With Hub:
-```
+
+```text
 O(log P + M) where:
   P = number of PURL hubs (indexed lookup)
   M = number of SBOMs connected to matching PURLs
@@ -755,12 +773,12 @@ Only checks relevant SBOMs
 
 ### Actual Performance Measurements
 
-| Operation | Without Hub | With Hub | Improvement |
-|-----------|-------------|----------|-------------|
-| CVE impact query (100K SBOMs) | 45s | 0.8s | 56× faster |
-| Severity filter (all releases) | 120s | 2.1s | 57× faster |
-| Release CVE report | 12s | 0.3s | 40× faster |
-| Endpoint audit | 8s | 0.5s | 16× faster |
+| Operation                      | Without Hub | With Hub | Improvement |
+|--------------------------------|-------------|----------|-------------|
+| CVE impact query (100K SBOMs)  | 45s         | 0.8s     | 56× faster  |
+| Severity filter (all releases) | 120s        | 2.1s     | 57× faster  |
+| Release CVE report             | 12s         | 0.3s     | 40× faster  |
+| Endpoint audit                 | 8s          | 0.5s     | 16× faster  |
 
 ```mermaid
 graph TB
@@ -829,6 +847,7 @@ flowchart LR
 - 1,000,000 releases → 1,001,000 edges → <3s query
 
 **Memory Efficiency**:
+
 - Hub nodes cached in memory (typically <100MB)
 - Edge metadata indexed for fast access
 - Query results streamed, not loaded fully
@@ -855,7 +874,7 @@ flowchart TB
 
 ### 1. Package URL (PURL) Specification
 
-**Official Spec**: https://github.com/package-url/purl-spec
+**Official Spec**: <https://github.com/package-url/purl-spec>
 
 **Purpose**: Standardized way to identify software packages across ecosystems
 
@@ -878,7 +897,8 @@ flowchart LR
 ```
 
 **Examples**:
-```
+
+```text
 pkg:npm/lodash@4.17.20
 pkg:pypi/django@3.2.0
 pkg:maven/org.apache.logging.log4j/log4j-core@2.14.1
@@ -886,17 +906,19 @@ pkg:golang/github.com/gin-gonic/gin@v1.7.0
 ```
 
 **Our Usage**:
+
 - Hub nodes store base form: `pkg:npm/lodash`
 - Edge metadata stores version: `4.17.20`
 - CVE data references packages by base PURL
 
 ### 2. OSV (Open Source Vulnerability) Schema
 
-**Official Spec**: https://ossf.github.io/osv-schema/
+**Official Spec**: <https://ossf.github.io/osv-schema/>
 
 **Purpose**: Standard format for vulnerability data across ecosystems
 
 **Key Fields We Use**:
+
 ```json
 {
   "id": "CVE-2024-1234",
@@ -949,6 +971,7 @@ flowchart TB
 ```
 
 **Integration**:
+
 - Ingest from OSV.dev API
 - Extract PURLs for hub connections
 - Parse version ranges for matching
@@ -956,11 +979,12 @@ flowchart TB
 
 ### 3. CycloneDX SBOM Specification
 
-**Official Spec**: https://cyclonedx.org/specification/overview/
+**Official Spec**: <https://cyclonedx.org/specification/overview/>
 
 **Purpose**: Standard for Software Bill of Materials
 
 **Component Structure**:
+
 ```json
 {
   "bomFormat": "CycloneDX",
@@ -995,6 +1019,7 @@ flowchart LR
 ```
 
 **Our Processing**:
+
 - Validate CycloneDX format
 - Extract component PURLs
 - Split into base PURL (hub) and version (edge metadata)
@@ -1002,7 +1027,7 @@ flowchart LR
 
 ### 4. ArangoDB Graph Database
 
-**Official Docs**: https://docs.arangodb.com/stable/graphs/
+**Official Docs**: <https://docs.arangodb.com/stable/graphs/>
 
 **Graph Model**:
 
@@ -1028,10 +1053,11 @@ flowchart TB
 ```
 
 - **Vertices**: Document collections (cve, purl, sbom, release, endpoint)
-- **Edges**: Edge collections with _from and _to references
+- **Edges**: Edge collections with _from and_to references
 - **Traversal**: Built-in graph traversal with AQL
 
 **Key Features We Use**:
+
 ```aql
 -- Named graphs for structure
 CREATE GRAPH vulnerabilityGraph
@@ -1046,6 +1072,7 @@ FOR vertex, edge, path IN 1..5 OUTBOUND "cve/12345" cve2purl
 ```
 
 **Performance Features**:
+
 - Persistent indexes on edge _from/_to fields
 - Compound indexes for complex queries
 - Edge direction optimization
@@ -1053,7 +1080,7 @@ FOR vertex, edge, path IN 1..5 OUTBOUND "cve/12345" cve2purl
 
 ### 5. CVSS (Common Vulnerability Scoring System)
 
-**Official Spec**: https://www.first.org/cvss/
+**Official Spec**: <https://www.first.org/cvss/>
 
 **Purpose**: Standardized vulnerability severity scoring
 
@@ -1088,6 +1115,7 @@ flowchart TB
 ```
 
 **Our Implementation**:
+
 - Use `github.com/pandatix/go-cvss` library
 - Support CVSS v3.0, v3.1, and v4.0
 - Parse vector strings: `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`
@@ -1095,6 +1123,7 @@ flowchart TB
 - Map to severity rating (CRITICAL/HIGH/MEDIUM/LOW)
 
 **Pre-Calculation Benefit**:
+
 - Store in `database_specific.severity_rating` field
 - Enable indexed filtering by severity
 - Avoid runtime CVSS parsing overhead
@@ -1123,18 +1152,22 @@ mindmap
 ```
 
 **Neo4j Documentation - Intermediate Nodes**:
-- URL: https://neo4j.com/developer/modeling-designs/
+
+- URL: <https://neo4j.com/developer/modeling-designs/>
 - Pattern: Using intermediate nodes to reduce fan-out
 
 **TigerGraph - Hub Vertices**:
-- URL: https://docs.tigergraph.com/
+
+- URL: <https://docs.tigergraph.com/>
 - Concept: Hub vertices for centralized connections
 
 **Graph Databases in Action (Manning)**:
+
 - Chapter: "Modeling for Performance"
 - Section: Star schemas and hub patterns
 
 **Our Adaptation**:
+
 - PURL nodes as package-level hubs
 - Version data on edges, not nodes
 - Bidirectional traversal support
@@ -1142,7 +1175,7 @@ mindmap
 
 ### 7. Semantic Versioning (SemVer)
 
-**Official Spec**: https://semver.org/
+**Official Spec**: <https://semver.org/>
 
 **Purpose**: Versioning scheme for software releases
 
@@ -1176,6 +1209,7 @@ flowchart LR
 - PATCH: Backwards-compatible bug fixes
 
 **Version Libraries We Use**:
+
 ```go
 import (
     "github.com/Masterminds/semver/v3"  // SemVer 2.0

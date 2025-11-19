@@ -1,3 +1,6 @@
+// Package cmd implements the command line interface (CLI) commands
+// for interacting with the CVE2Release-Tracker API, including uploading releases,
+// generating SBOMs using Syft, and fetching release details.
 package cmd
 
 import (
@@ -60,6 +63,8 @@ var getCmd = &cobra.Command{
 	RunE:  runGet,
 }
 
+// ProcessConfig defines the structure for the optional process.yaml file,
+// listing repositories and their corresponding release branches to process.
 type ProcessConfig struct {
 	Repositories map[string]string `yaml:"repositories"`
 }
@@ -78,6 +83,8 @@ func init() {
 	getCmd.Flags().BoolVar(&sbomOnly, "sbom-only", false, "Output only SBOM content")
 }
 
+// Execute adds all child commands to the root command and sets flags appropriately.
+// It is the primary entry point for the CLI application.
 func Execute() {
 	if err := rootCmd.Execute(); err != nil {
 		fmt.Fprintln(os.Stderr, err)
@@ -87,7 +94,7 @@ func Execute() {
 
 // -------------------- UPLOAD LOGIC --------------------
 
-func runUpload(cmd *cobra.Command, args []string) error {
+func runUpload(_ *cobra.Command, _ []string) error {
 	if processFile != "" {
 		cfg, err := loadProcessFile(processFile)
 		if err != nil {
@@ -618,7 +625,7 @@ func postRelease(serverURL string, payload interface{}) error {
 
 // -------------------- LIST & GET --------------------
 
-func runList(cmd *cobra.Command, args []string) error {
+func runList(_ *cobra.Command, _ []string) error {
 	url := serverURL + "/api/v1/releases"
 	resp, err := http.Get(url)
 	if err != nil {
@@ -655,7 +662,7 @@ func runList(cmd *cobra.Command, args []string) error {
 	return nil
 }
 
-func runGet(cmd *cobra.Command, args []string) error {
+func runGet(_ *cobra.Command, args []string) error {
 	name := args[0]
 	version := args[1]
 

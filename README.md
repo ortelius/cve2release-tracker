@@ -4,7 +4,7 @@ SCEC Database API and CLI for managing software releases and SBOMs.
 
 ## Project Structure
 
-```
+```text
 scec-db/
 ├── cmd/          # CLI commands
 ├── cli/          # CLI entry point
@@ -17,12 +17,14 @@ scec-db/
 ## Building
 
 ### API Server
+
 ```bash
 go build -o scec-server main.go
 ./scec-server
 ```
 
 ### CLI Client
+
 ```bash
 go build -o scec-cli ./cli
 ./scec-cli upload --sbom sbom.json

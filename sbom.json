@@ -4320,27 +4320,19 @@
     },
     {
       "ref": "pkg:apk/wolfi/libbz2-1@1.0.8-r21?arch=x86_64&distro=20230201",
-      "dependsOn": [
-        "pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"
-      ]
+      "dependsOn": ["pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"]
     },
     {
       "ref": "pkg:apk/wolfi/libcrypto3@3.5.2-r1?arch=x86_64&distro=20230201",
-      "dependsOn": [
-        "pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"
-      ]
+      "dependsOn": ["pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"]
     },
     {
       "ref": "pkg:apk/wolfi/libexpat1@2.7.2-r0?arch=x86_64&distro=20230201",
-      "dependsOn": [
-        "pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"
-      ]
+      "dependsOn": ["pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"]
     },
     {
       "ref": "pkg:apk/wolfi/libffi@3.5.2-r1?arch=x86_64&distro=20230201",
-      "dependsOn": [
-        "pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"
-      ]
+      "dependsOn": ["pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"]
     },
     {
       "ref": "pkg:apk/wolfi/libgcc@15.2.0-r2?arch=x86_64&distro=20230201",
@@ -4432,9 +4424,7 @@
     },
     {
       "ref": "pkg:apk/wolfi/sqlite-libs@3.50.4-r1?arch=x86_64&distro=20230201",
-      "dependsOn": [
-        "pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"
-      ]
+      "dependsOn": ["pkg:apk/wolfi/glibc@2.42-r0?arch=x86_64&distro=20230201"]
     },
     {
       "ref": "pkg:apk/wolfi/wolfi-baselayout@20230201-r24?arch=x86_64&distro=20230201",

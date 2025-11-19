@@ -24,11 +24,11 @@ By connecting vulnerability data with project releases and their deployment loca
 
 **At Setup, Users Connect:**
 
-| Code Repository | Binary Repository | GitOps Repository |
-|----------------|-------------------|-------------------|
-| GitHub/GitLab repos | Quay, DockerHub | GitHub/GitLab deployment repos |
-| SBOMs & dependency files | ArtifactHub, Sonatype | Cloud provider configs |
-| Source code & commits | JFrog, GitHub Packages | Kubernetes/ArgoCD manifests |
+| Code Repository          | Binary Repository      | GitOps Repository              |
+|--------------------------|------------------------|--------------------------------|
+| GitHub/GitLab repos      | Quay, DockerHub        | GitHub/GitLab deployment repos |
+| SBOMs & dependency files | ArtifactHub, Sonatype  | Cloud provider configs         |
+| Source code & commits    | JFrog, GitHub Packages | Kubernetes/ArgoCD manifests    |
 
 ## Functional Requirements
 
@@ -39,6 +39,7 @@ The system automatically ingests vulnerability data from OSV.dev on a scheduled 
 **CVSS Score Calculation:** During ingestion, the system parses CVSS v3.0, v3.1, and v4.0 vector strings (e.g., `CVSS:3.1/AV:N/AC:L/PR:N/UI:N/S:U/C:H/I:H/A:H`) using the `github.com/pandatix/go-cvss` library to calculate accurate numeric base scores. These calculated scores are stored in the `database_specific` field alongside severity ratings (CRITICAL, HIGH, MEDIUM, LOW). CVEs without severity information are automatically assigned a LOW severity rating (score: 0.1) to ensure comprehensive tracking. This pre-calculation approach eliminates runtime parsing overhead and enables efficient severity-based queries.
 
 **Severity Rating Mappings:**
+
 - **CRITICAL**: CVSS score 9.0 - 10.0
 - **HIGH**: CVSS score 7.0 - 8.9
 - **MEDIUM**: CVSS score 4.0 - 6.9
@@ -57,7 +58,7 @@ The system tracks deployment of releases to endpoints, creating a complete pictu
 
 ### Vulnerability Analysis
 
-The system performs sophisticated vulnerability matching by connecting CVEs to affected releases through PURL-based graph relationships. Version matching follows OSV specifications, supporting both semantic versioning (SEMVER) and ecosystem-specific version schemes. The matching logic accurately identifies all releases affected by a given CVE and all CVEs affecting a given release. Version-specific matching is achieved through metadata stored on graph edges, allowing precise filtering that eliminates false positives. The system handles complex version range specifications including minimum versions, maximum versions, and specific version exclusions. 
+The system performs sophisticated vulnerability matching by connecting CVEs to affected releases through PURL-based graph relationships. Version matching follows OSV specifications, supporting both semantic versioning (SEMVER) and ecosystem-specific version schemes. The matching logic accurately identifies all releases affected by a given CVE and all CVEs affecting a given release. Version-specific matching is achieved through metadata stored on graph edges, allowing precise filtering that eliminates false positives. The system handles complex version range specifications including minimum versions, maximum versions, and specific version exclusions.
 
 **Severity-Based Filtering:** Queries can filter vulnerabilities by severity rating (CRITICAL, HIGH, MEDIUM, LOW) using pre-calculated values stored during ingestion. The system performs efficient string-based filtering on severity ratings rather than complex numeric range calculations, significantly improving query performance. All severity-based queries traverse from CVEs through PURLs to releases and their deployed endpoints, providing complete impact analysis at any severity threshold.
 
@@ -625,6 +626,7 @@ The hub-and-spoke design separates version-agnostic package identification from 
 - **Runtime Matching**: Go code compares edge version against CVE ranges
 
 This separation enables:
+
 - ✅ Efficient storage (one PURL node per package, not per version)
 - ✅ Fast hub identification (CVE → PURL lookup is instant)
 - ✅ Precise version filtering (metadata on edges, not on nodes)
@@ -702,21 +704,21 @@ flowchart TB
 This hub-and-spoke pattern follows established graph database practices:
 
 1. **ArangoDB Graph Pattern**: Uses named edge collections for typed relationships
-   - Documentation: https://docs.arangodb.com/stable/graphs/
+   - Documentation: <https://docs.arangodb.com/stable/graphs/>
    - Our implementation: `CVE2PURL`, `SBOM2PURL`, `RELEASE2SBOM` edge collections
 
 2. **Package URL (PURL) Specification**: Standardized package identifiers
-   - Spec: https://github.com/package-url/purl-spec
+   - Spec: <https://github.com/package-url/purl-spec>
    - Format: `scheme:type/namespace/name@version?qualifiers#subpath`
    - Our hubs use: `pkg:npm/lodash` (base form without version/qualifiers)
 
 3. **OSV Schema**: Open Source Vulnerability format
-   - Spec: https://ossf.github.io/osv-schema/
+   - Spec: <https://ossf.github.io/osv-schema/>
    - CVE data includes affected packages as PURLs
    - Our edges connect OSV PURLs to SBOM component PURLs
 
 4. **CycloneDX SBOM**: Industry standard for software bill of materials
-   - Spec: https://cyclonedx.org/specification/overview/
+   - Spec: <https://cyclonedx.org/specification/overview/>
    - Components include PURL identifiers with versions
    - Our SBOM2PURL edges extract these PURLs
 
@@ -727,12 +729,12 @@ This hub-and-spoke pattern follows established graph database practices:
 
 **Performance Characteristics:**
 
-| Operation | Complexity | Example Time |
-|-----------|-----------|--------------|
-| CVE → PURL lookup | O(1) | <1ms |
-| PURL → SBOMs traversal | O(log N) | <10ms for 10K SBOMs |
-| Version filtering | O(M) | <50ms for 500 components |
-| Full CVE impact query | O(log N + M) | <1s for 100K CVEs |
+| Operation              | Complexity   | Example Time             |
+|------------------------|--------------|--------------------------|
+| CVE → PURL lookup      | O(1)         | <1ms                     |
+| PURL → SBOMs traversal | O(log N)     | <10ms for 10K SBOMs      |
+| Version filtering      | O(M)         | <50ms for 500 components |
+| Full CVE impact query  | O(log N + M) | <1s for 100K CVEs        |
 
 **Alternative Architectures Considered:**
 
@@ -742,6 +744,7 @@ This hub-and-spoke pattern follows established graph database practices:
 4. **Separate graphs per ecosystem**: Rejected due to cross-ecosystem queries
 
 The hub-and-spoke architecture provides the optimal balance of:
+
 - Query performance (indexed hub lookups)
 - Storage efficiency (minimal duplication)
 - Version flexibility (edge metadata)
@@ -752,6 +755,7 @@ The hub-and-spoke architecture provides the optimal balance of:
 **Content-Based Deduplication**: Releases use composite natural keys (name + version + contentsha) to handle rebuild scenarios, while SBOMs use SHA256 content hashing to enable sharing across multiple releases with identical dependencies.
 
 **CVSS Pre-Calculation**: CVE documents include a `database_specific` field containing pre-calculated CVSS scores and severity ratings. This field structure is:
+
 ```json
 {
   "cvss_base_score": 9.8,
@@ -759,6 +763,7 @@ The hub-and-spoke architecture provides the optimal balance of:
   "severity_rating": "CRITICAL"
 }
 ```
+
 This design enables fast severity-based queries using indexed string comparisons instead of runtime parsing and numeric calculations.
 
 **Sync Tracking**: Sync records create the critical link between releases and endpoints, enabling queries that answer "where is this vulnerability running in production?" Each sync records when a specific release version was deployed to a specific endpoint.
@@ -790,12 +795,14 @@ The `database_specific` field in CVE documents stores calculated CVSS informatio
 ```
 
 **Field Descriptions:**
+
 - `cvss_base_score`: Highest numeric CVSS score (used for sorting and display)
 - `cvss_base_scores`: Array of all calculated scores (for CVEs with multiple CVSS vectors)
 - `severity_rating`: String value (CRITICAL, HIGH, MEDIUM, LOW, NONE) used for filtering
 
 **Default Values:**
 CVEs without parseable CVSS vectors receive:
+
 - `cvss_base_score`: 0.1
 - `cvss_base_scores`: [0.1]
 - `severity_rating`: "LOW"
@@ -1115,6 +1122,7 @@ GET /api/v1/severity/{severity}/affected-releases
 ```
 
 **Parameters:**
+
 - `severity`: critical, high, medium, or low
 
 **Graph Traversal (Optimized):**
@@ -1161,6 +1169,7 @@ FOR release IN release
 ```
 
 **Performance:**
+
 - String-based filtering on `severity_rating` is indexed
 - No runtime CVSS parsing required
 - Efficient even with 100,000+ CVEs
@@ -1281,6 +1290,7 @@ GET /api/v1/severity/{severity}/affected-endpoints
 **Note:** CVE-specific endpoints have been replaced with severity-based query endpoints. Instead of querying individual CVEs, use the severity endpoints to find all releases and endpoints affected by vulnerabilities at a given severity level (CRITICAL, HIGH, MEDIUM, LOW).
 
 **Available Endpoint Groups:**
+
 - **Release Endpoints**: Upload, list, and retrieve releases with SBOMs
 - **Severity-Based Query Endpoints**: Query releases and endpoints by vulnerability severity
 - **Endpoint Management**: Create and manage deployment endpoints
@@ -1289,11 +1299,13 @@ GET /api/v1/severity/{severity}/affected-endpoints
 ### Release Endpoints
 
 #### Upload Release with SBOM
+
 **Endpoint:** `POST /api/v1/releases`
 
 **Description:** Creates a new release with associated SBOM. The CLI uses this endpoint when running `cve2release-cli upload`.
 
 **Request Body:** ReleaseWithSBOM structure
+
 ```json
 {
   "name": "my-service",
@@ -1312,6 +1324,7 @@ GET /api/v1/severity/{severity}/affected-endpoints
 ```
 
 **Response:** 201 Created
+
 ```json
 {
   "success": true,
@@ -1321,16 +1334,19 @@ GET /api/v1/severity/{severity}/affected-endpoints
 ```
 
 **CLI Usage:**
+
 ```bash
 cve2release-cli upload --sbom sbom.json --type application
 ```
 
 #### List All Releases
+
 **Endpoint:** `GET /api/v1/releases`
 
 **Description:** Returns a list of all releases with basic metadata. The CLI uses this endpoint when running `cve2release-cli list`.
 
 **Response:** 200 OK
+
 ```json
 {
   "success": true,
@@ -1346,16 +1362,19 @@ cve2release-cli upload --sbom sbom.json --type application
 ```
 
 **CLI Usage:**
+
 ```bash
 cve2release-cli list
 ```
 
 #### Get Specific Release
+
 **Endpoint:** `GET /api/v1/releases/{name}/{version}`
 
 **Description:** Returns detailed information about a specific release including its SBOM. The CLI uses this endpoint when running `cve2release-cli get`.
 
 **Response:** 200 OK
+
 ```json
 {
   "name": "my-service",
@@ -1374,6 +1393,7 @@ cve2release-cli list
 ```
 
 **CLI Usage:**
+
 ```bash
 cve2release-cli get my-service 1.0.0
 cve2release-cli get my-service 1.0.0 --output sbom.json
@@ -1381,11 +1401,13 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 ```
 
 #### Get CVEs for Release
+
 **Endpoint:** `GET /api/v1/releases/{name}/{version}/cves`
 
 **Description:** Returns all CVEs affecting a specific release.
 
 **Response:** 200 OK
+
 ```json
 {
   "release_name": "my-service",
@@ -1408,14 +1430,17 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 ### Severity-Based Query Endpoints
 
 #### Get Affected Releases by Severity
+
 **Endpoint:** `GET /api/v1/severity/{severity}/affected-releases`
 
 **Description:** Returns all releases affected by vulnerabilities at or above the specified severity level.
 
 **Parameters:**
+
 - `severity`: critical, high, medium, or low (case-insensitive)
 
 **Response:** 200 OK
+
 ```json
 {
   "success": true,
@@ -1438,14 +1463,17 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 ```
 
 #### Get Affected Endpoints by Severity
+
 **Endpoint:** `GET /api/v1/severity/{severity}/affected-endpoints`
 
 **Description:** Returns all endpoints running releases affected by vulnerabilities at or above the specified severity level.
 
 **Parameters:**
+
 - `severity`: critical, high, medium, or low (case-insensitive)
 
 **Response:** 200 OK
+
 ```json
 {
   "success": true,
@@ -1469,12 +1497,14 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 }
 ```
 
-### Endpoint Management
+### Additional Endpoint Management
 
 #### Create Endpoint
+
 **Endpoint:** `POST /api/v1/endpoint`
 
 **Request Body:**
+
 ```json
 {
   "name": "prod-k8s-us-east",
@@ -1486,9 +1516,11 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 **Response:** 201 Created
 
 #### List All Endpoints
+
 **Endpoint:** `GET /api/v1/endpoints`
 
 **Response:** 200 OK
+
 ```json
 {
   "success": true,
@@ -1498,6 +1530,7 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 ```
 
 #### Get Endpoint Details
+
 **Endpoint:** `GET /api/v1/endpoint/{name}`
 
 **Response:** 200 OK
@@ -1505,9 +1538,11 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 ### Sync Operations
 
 #### Record Deployment Sync
+
 **Endpoint:** `POST /api/v1/sync`
 
 **Request Body:**
+
 ```json
 {
   "release_name": "my-service",
@@ -1519,11 +1554,13 @@ cve2release-cli get my-service 1.0.0 --sbom-only
 **Response:** 201 Created
 
 #### List All Syncs
+
 **Endpoint:** `GET /api/v1/syncs`
 
 **Response:** 200 OK
 
 #### Get Syncs for Release
+
 **Endpoint:** `GET /api/v1/sync/{release_name}/{release_version}`
 
 **Response:** 200 OK
@@ -1826,12 +1863,14 @@ flowchart LR
 ```
 
 **Benefits:**
+
 - No maintenance window required
 - Continuous service availability during updates
 - Automatic rollback capability if health checks fail
 - Gradual traffic migration minimizes risk
 
 **Kubernetes Example:**
+
 ```yaml
 apiVersion: apps/v1
 kind: Deployment
@@ -1865,6 +1904,7 @@ spec:
 **Options:**
 
 1. **Full Re-Ingestion** (Recommended)
+
    ```bash
    # Clear existing CVEs
    # Run CVE loader with CVSS calculation
@@ -1872,6 +1912,7 @@ spec:
    ```
 
 2. **Migration Script** (For large datasets)
+
    ```javascript
    // ArangoDB migration to set default LOW severity
    FOR cve IN cve
@@ -1917,7 +1958,7 @@ REQUEST_TIMEOUT=3s
 
 ## Conclusion
 
-This Post-Deployment Vulnerability Remediation system provides comprehensive visibility into software vulnerabilities across the entire deployment lifecycle. By connecting CVE data with releases, SBOMs, and actual deployment endpoints, security teams can quickly answer the critical questions: "Where is this vulnerability running?" and "How do I fix it?" 
+This Post-Deployment Vulnerability Remediation system provides comprehensive visibility into software vulnerabilities across the entire deployment lifecycle. By connecting CVE data with releases, SBOMs, and actual deployment endpoints, security teams can quickly answer the critical questions: "Where is this vulnerability running?" and "How do I fix it?"
 
 The hub-and-spoke architecture ensures scalability and performance, while the sync tracking mechanism provides the crucial link between code and production systems. The addition of pre-calculated CVSS scores and severity ratings enables efficient, real-time severity-based filtering and prioritization, with all API operations completing within 3 seconds to ensure optimal end-user experience. The rolling update deployment strategy ensures continuous availability, eliminating the need for maintenance windows while maintaining service quality.
 

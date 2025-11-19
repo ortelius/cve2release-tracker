@@ -1,5 +1,5 @@
-// package graphql - UPDATED VERSION
-
+// Package graphql provides the GraphQL schema definition and resolvers
+// for querying release, vulnerability, and endpoint data from the ArangoDB database.
 package graphql
 
 import (
@@ -17,10 +17,12 @@ import (
 
 var db database.DBConnection
 
+// InitDB initializes the global database connection variable used by all resolvers.
 func InitDB(dbConn database.DBConnection) {
 	db = dbConn
 }
 
+// SeverityType defines an enumeration of common vulnerability severity levels.
 var SeverityType = graphql.NewEnum(graphql.EnumConfig{
 	Name: "Severity",
 	Values: graphql.EnumValueConfigMap{
@@ -32,42 +34,45 @@ var SeverityType = graphql.NewEnum(graphql.EnumConfig{
 	},
 })
 
+// VulnerabilityCountType is a structure for summarizing the count of vulnerabilities by severity rating.
 var VulnerabilityCountType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "VulnerabilityCount",
 	Fields: graphql.Fields{
-		"critical": &graphql.Field{Type: graphql.Int},
-		"high":     &graphql.Field{Type: graphql.Int},
-		"medium":   &graphql.Field{Type: graphql.Int},
-		"low":      &graphql.Field{Type: graphql.Int},
+		"critical": &graphql.Field{Type: graphql.Int}, // The count of critical vulnerabilities.
+		"high":     &graphql.Field{Type: graphql.Int}, // The count of high vulnerabilities.
+		"medium":   &graphql.Field{Type: graphql.Int}, // The count of medium vulnerabilities.
+		"low":      &graphql.Field{Type: graphql.Int}, // The count of low vulnerabilities.
 	},
 })
 
+// VulnerabilityType defines the details of a specific vulnerability (CVE/OSV) associated with a package and version within a release.
 var VulnerabilityType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Vulnerability",
 	Fields: graphql.Fields{
-		"cve_id":           &graphql.Field{Type: graphql.String},
-		"summary":          &graphql.Field{Type: graphql.String},
-		"details":          &graphql.Field{Type: graphql.String},
-		"severity_score":   &graphql.Field{Type: graphql.Float},
-		"severity_rating":  &graphql.Field{Type: graphql.String},
-		"cvss_v3_score":    &graphql.Field{Type: graphql.String},
-		"published":        &graphql.Field{Type: graphql.String},
-		"modified":         &graphql.Field{Type: graphql.String},
-		"aliases":          &graphql.Field{Type: graphql.NewList(graphql.String)},
-		"package":          &graphql.Field{Type: graphql.String},
-		"affected_version": &graphql.Field{Type: graphql.String},
-		"full_purl":        &graphql.Field{Type: graphql.String},
-		"fixed_in":         &graphql.Field{Type: graphql.NewList(graphql.String)},
+		"cve_id":           &graphql.Field{Type: graphql.String},                  // The common vulnerability identifier (e.g., "CVE-2022-XXXXX").
+		"summary":          &graphql.Field{Type: graphql.String},                  // A brief description of the vulnerability.
+		"details":          &graphql.Field{Type: graphql.String},                  // Full description and technical details of the vulnerability.
+		"severity_score":   &graphql.Field{Type: graphql.Float},                   // The base CVSS score (e.g., 9.8).
+		"severity_rating":  &graphql.Field{Type: graphql.String},                  // The human-readable severity rating (e.g., "Critical", "High").
+		"cvss_v3_score":    &graphql.Field{Type: graphql.String},                  // The full CVSS v3 vector string.
+		"published":        &graphql.Field{Type: graphql.String},                  // Timestamp when the vulnerability was first published.
+		"modified":         &graphql.Field{Type: graphql.String},                  // Timestamp of the last time the vulnerability details were modified.
+		"aliases":          &graphql.Field{Type: graphql.NewList(graphql.String)}, // Alternative IDs for the vulnerability (e.g., GHSA, OSV IDs).
+		"package":          &graphql.Field{Type: graphql.String},                  // The package URL (PURL) of the vulnerable dependency (e.g., "pkg:maven/group/artifact").
+		"affected_version": &graphql.Field{Type: graphql.String},                  // The exact version of the package affected in the release.
+		"full_purl":        &graphql.Field{Type: graphql.String},                  // The full PURL including the version and other qualifiers.
+		"fixed_in":         &graphql.Field{Type: graphql.NewList(graphql.String)}, // A list of versions where the package is known to be fixed.
 	},
 })
 
+// SBOMType represents a Software Bill of Materials, often linked to a specific release.
 var SBOMType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "SBOM",
 	Fields: graphql.Fields{
-		"key":        &graphql.Field{Type: graphql.String},
-		"contentsha": &graphql.Field{Type: graphql.String},
-		"objtype":    &graphql.Field{Type: graphql.String},
-		"content": &graphql.Field{
+		"key":        &graphql.Field{Type: graphql.String}, // The primary key/document ID for the SBOM in the database.
+		"contentsha": &graphql.Field{Type: graphql.String}, // A unique SHA-256 hash of the SBOM's content.
+		"objtype":    &graphql.Field{Type: graphql.String}, // The type of object (e.g., "sbom").
+		"content": &graphql.Field{ // The full content of the SBOM document (resolved from the underlying Go struct byte slice).
 			Type: graphql.String,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 				if sbom, ok := p.Source.(model.SBOM); ok {
@@ -81,228 +86,235 @@ var SBOMType = graphql.NewObject(graphql.ObjectConfig{
 
 // --- Start of OpenSSF Scorecard Types ---
 
+// ScorecardDocumentationType defines documentation links for an OpenSSF Scorecard check.
 var ScorecardDocumentationType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardDocumentation",
 	Fields: graphql.Fields{
 		"Short": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			doc, _ := p.Source.(model.Documentation)
 			return doc.Short, nil
-		}},
+		}}, // A short description or title for the documentation.
 		"URL": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			doc, _ := p.Source.(model.Documentation)
 			return doc.URL, nil
-		}},
+		}}, // The URL to the detailed documentation.
 	},
 })
 
+// ScorecardCheckType defines the result and details for a single check performed by OpenSSF Scorecard.
 var ScorecardCheckType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardCheck",
 	Fields: graphql.Fields{
 		"Name": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			check, _ := p.Source.(model.Check)
 			return check.Name, nil
-		}},
+		}}, // The name of the scorecard check (e.g., "Branch-Protection").
 		"Score": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			check, _ := p.Source.(model.Check)
 			return check.Score, nil
-		}},
+		}}, // The numerical score (0-10) for the check.
 		"Reason": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			check, _ := p.Source.(model.Check)
 			return check.Reason, nil
-		}},
+		}}, // A human-readable reason for the given score.
 		"Details": &graphql.Field{Type: graphql.NewList(graphql.String), Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			check, _ := p.Source.(model.Check)
 			return check.Details, nil
-		}},
+		}}, // Detailed output or issues found by the check.
 		"Documentation": &graphql.Field{Type: ScorecardDocumentationType, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			check, _ := p.Source.(model.Check)
 			return check.Documentation, nil
-		}},
+		}}, // Links to documentation explaining the check.
 	},
 })
 
+// ScorecardRepoType defines repository information used for the OpenSSF Scorecard run.
 var ScorecardRepoType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardRepo",
 	Fields: graphql.Fields{
 		"Name": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			repo, _ := p.Source.(model.Repo)
 			return repo.Name, nil
-		}},
+		}}, // The name of the repository (e.g., "github.com/owner/repo").
 		"Commit": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			repo, _ := p.Source.(model.Repo)
 			return repo.Commit, nil
-		}},
+		}}, // The commit SHA that was scanned.
 	},
 })
 
+// ScorecardScoresType defines metadata about the OpenSSF Scorecard tool version and commit.
 var ScorecardScoresType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardScores",
 	Fields: graphql.Fields{
 		"Version": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			scores, _ := p.Source.(model.Scores)
 			return scores.Version, nil
-		}},
+		}}, // The version of the Scorecard tool used.
 		"Commit": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			scores, _ := p.Source.(model.Scores)
 			return scores.Commit, nil
-		}},
+		}}, // The commit SHA of the Scorecard tool used.
 	},
 })
 
+// ScorecardResultType defines the full result of an OpenSSF Scorecard analysis for a repository.
 var ScorecardResultType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardResult",
 	Fields: graphql.Fields{
 		"Date": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			res, _ := p.Source.(*model.ScorecardAPIResponse)
 			return res.Date, nil
-		}},
+		}}, // The date the scan was performed.
 		"Repo": &graphql.Field{Type: ScorecardRepoType, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			res, _ := p.Source.(*model.ScorecardAPIResponse)
 			return res.Repo, nil
-		}},
+		}}, // The repository information that was scanned.
 		"Scorecard": &graphql.Field{Type: ScorecardScoresType, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			res, _ := p.Source.(*model.ScorecardAPIResponse)
 			return res.Scorecard, nil
-		}},
+		}}, // Metadata about the scorecard run.
 		"Score": &graphql.Field{Type: graphql.Float, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			res, _ := p.Source.(*model.ScorecardAPIResponse)
 			return res.Score, nil
-		}},
+		}}, // The overall final score (0.0 - 10.0).
 		"Checks": &graphql.Field{Type: graphql.NewList(ScorecardCheckType), Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			res, _ := p.Source.(*model.ScorecardAPIResponse)
 			return res.Checks, nil
-		}},
+		}}, // List of results for individual checks.
 		"Metadata": &graphql.Field{Type: graphql.NewList(graphql.String), Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			res, _ := p.Source.(*model.ScorecardAPIResponse)
 			return res.Metadata, nil
-		}},
+		}}, // Additional metadata from the scorecard run.
 	},
 })
 
 // --- End of OpenSSF Scorecard Types ---
+
+// ReleaseType is the core entity representing a software project's release, including metadata, build info, and relationships to SBOMs and vulnerabilities.
 var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Release",
 	Fields: graphql.Fields{
-		"key":          &graphql.Field{Type: graphql.String},
-		"name":         &graphql.Field{Type: graphql.String},
-		"version":      &graphql.Field{Type: graphql.String},
-		"project_type": &graphql.Field{Type: graphql.String},
+		"key":          &graphql.Field{Type: graphql.String}, // The primary key/document ID for the release.
+		"name":         &graphql.Field{Type: graphql.String}, // The project name for the release.
+		"version":      &graphql.Field{Type: graphql.String}, // The version string for the release (e.g., "v1.2.3").
+		"project_type": &graphql.Field{Type: graphql.String}, // The type of project (e.g., "docker", "maven", "git").
 
 		// --- Container Artifact Fields ---
 		"content_sha": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.ContentSha, nil
-		}},
+		}}, // SHA of the artifact content, if applicable (e.g., Docker image manifest digest).
 		"docker_repo": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.DockerRepo, nil
-		}},
+		}}, // Docker repository name.
 		"docker_tag": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.DockerTag, nil
-		}},
+		}}, // Docker tag name.
 		"docker_sha": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.DockerSha, nil
-		}},
+		}}, // Docker image SHA.
 		"basename": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.Basename, nil
-		}},
+		}}, // Basename of the artifact file.
 
 		// --- Git/Source Fields ---
 		"git_commit": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitCommit, nil
-		}},
+		}}, // The full Git commit hash.
 		"git_branch": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitBranch, nil
-		}},
+		}}, // The Git branch the commit came from.
 		"git_tag": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitTag, nil
-		}},
+		}}, // The Git tag applied to the commit.
 		"git_repo": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitRepo, nil
-		}},
+		}}, // The Git repository name.
 		"git_org": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitOrg, nil
-		}},
+		}}, // The Git organization name.
 		"git_url": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitURL, nil
-		}},
+		}}, // The full Git repository URL.
 		"git_repo_project": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitRepoProject, nil
-		}},
+		}}, // The Git repository project path.
 		"git_verify_commit": &graphql.Field{Type: graphql.Boolean, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitVerifyCommit, nil
-		}},
+		}}, // Boolean indicating if the commit was cryptographically verified.
 		"git_signed_off_by": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitSignedOffBy, nil
-		}},
+		}}, // The GPG key ID used to sign the commit.
 
 		// --- Metrics & Timestamps Fields ---
 		"git_commit_timestamp": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitCommitTimestamp, nil
-		}},
+		}}, // Timestamp of the Git commit.
 		"git_commit_authors": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitCommitAuthors, nil
-		}},
+		}}, // List of unique commit authors for this release.
 		"git_committerscnt": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitCommittersCnt, nil
-		}},
+		}}, // Count of unique committers for this release.
 		"git_total_committerscnt": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitTotalCommittersCnt, nil
-		}},
+		}}, // Total count of unique committers in the project history.
 		"git_contrib_percentage": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitContribPercentage, nil
-		}},
+		}}, // Committer contribution percentage.
 		"git_lines_added": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitLinesAdded, nil
-		}},
+		}}, // Lines of code added since the previous comparable commit.
 		"git_lines_deleted": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitLinesDeleted, nil
-		}},
+		}}, // Lines of code deleted since the previous comparable commit.
 		"git_lines_total": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitLinesTotal, nil
-		}},
+		}}, // Total lines of code in the project at this commit.
 		"git_prev_comp_commit": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.GitPrevCompCommit, nil
-		}},
+		}}, // The previous comparable commit SHA.
 
 		// --- Build Environment Fields ---
 		"build_date": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.BuildDate, nil
-		}},
+		}}, // Date and time the release artifact was built.
 		"build_id": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.BuildID, nil
-		}},
+		}}, // Identifier for the build job/pipeline.
 		"build_num": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.BuildNum, nil
-		}},
+		}}, // Build number or sequence.
 		"build_url": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 			release, _ := p.Source.(model.ProjectRelease)
 			return release.BuildURL, nil
-		}},
+		}}, // URL to the build system job/log.
 
 		// --- SBOM/Vulnerabilities ---
 		"sbom": &graphql.Field{
@@ -339,7 +351,7 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				}
 				return nil, nil
 			},
-		},
+		}, // The associated SBOM for this release.
 		"vulnerabilities": &graphql.Field{
 			Type: graphql.NewList(VulnerabilityType),
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -349,7 +361,7 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				}
 				return resolveReleaseVulnerabilities(release.Name, release.Version)
 			},
-		},
+		}, // List of all vulnerabilities found in the release's dependencies.
 
 		// --- Synced Endpoints ---
 		"synced_endpoint_count": &graphql.Field{
@@ -370,7 +382,7 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				// 2. Calculate the count based on the list length
 				return len(endpoints), nil
 			},
-		},
+		}, // The total number of endpoints currently consuming this release.
 		"synced_endpoints": &graphql.Field{
 			Type: graphql.NewList(AffectedEndpointType),
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -381,7 +393,7 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				// Use the existing resolver function to fetch the list of endpoints
 				return resolveAffectedEndpoints(release.Name, release.Version)
 			},
-		},
+		}, // The list of endpoints currently consuming this release.
 
 		// --- OpenSSF Scorecard Fields ---
 		"openssf_scorecard_score": &graphql.Field{
@@ -390,7 +402,7 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				release, _ := p.Source.(model.ProjectRelease)
 				return release.OpenSSFScorecardScore, nil
 			},
-		},
+		}, // The aggregate score from the OpenSSF Scorecard run.
 		"scorecard_result": &graphql.Field{
 			Type: ScorecardResultType,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -398,87 +410,92 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				// Returning the pointer to the struct as defined in model.ProjectRelease
 				return release.ScorecardResult, nil
 			},
-		},
+		}, // The full details of the OpenSSF Scorecard analysis.
 	},
 })
 
+// ReleaseInfoType is a minimal structure to identify a release by its name and version.
 var ReleaseInfoType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ReleaseInfo",
 	Fields: graphql.Fields{
-		"release_name":    &graphql.Field{Type: graphql.String},
-		"release_version": &graphql.Field{Type: graphql.String},
+		"release_name":    &graphql.Field{Type: graphql.String}, // The name of the project.
+		"release_version": &graphql.Field{Type: graphql.String}, // The version of the project.
 	},
 })
 
+// SyncedEndpointType defines a deployable endpoint (e.g., a cluster, environment) that consumes one or more releases, including its sync status and a summary of vulnerabilities across all its releases.
 var SyncedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "SyncedEndpoint",
 	Fields: graphql.Fields{
-		"endpoint_name": &graphql.Field{Type: graphql.String},
-		"endpoint_url":  &graphql.Field{Type: graphql.String},
-		"endpoint_type": &graphql.Field{Type: graphql.String},
-		"environment":   &graphql.Field{Type: graphql.String},
-		"status":        &graphql.Field{Type: graphql.String},
-		"last_sync":     &graphql.Field{Type: graphql.String},
-		"release_count": &graphql.Field{Type: graphql.Int},
+		"endpoint_name": &graphql.Field{Type: graphql.String}, // The name of the deployment endpoint.
+		"endpoint_url":  &graphql.Field{Type: graphql.String}, // The URL associated with the endpoint.
+		"endpoint_type": &graphql.Field{Type: graphql.String}, // The type of environment (e.g., "kubernetes").
+		"environment":   &graphql.Field{Type: graphql.String}, // The general environment (e.g., "staging", "production").
+		"status":        &graphql.Field{Type: graphql.String}, // The current status of the endpoint.
+		"last_sync":     &graphql.Field{Type: graphql.String}, // The timestamp of the most recent release synchronization.
+		"release_count": &graphql.Field{Type: graphql.Int},    // The total number of releases being consumed by this endpoint.
 		"total_vulnerabilities": &graphql.Field{
 			Type: VulnerabilityCountType,
-		},
+		}, // A breakdown of critical, high, medium, and low vulnerabilities across all synced releases.
 		"releases": &graphql.Field{
 			Type: graphql.NewList(ReleaseInfoType),
-		},
+		}, // A list of releases currently deployed to this endpoint.
 	},
 })
 
+// AffectedEndpointType provides details about an endpoint that is consuming a specific release.
 var AffectedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "AffectedEndpoint",
 	Fields: graphql.Fields{
-		"endpoint_name": &graphql.Field{Type: graphql.String},
-		"endpoint_url":  &graphql.Field{Type: graphql.String},
-		"endpoint_type": &graphql.Field{Type: graphql.String},
-		"environment":   &graphql.Field{Type: graphql.String},
-		"last_sync":     &graphql.Field{Type: graphql.String},
-		"status":        &graphql.Field{Type: graphql.String},
+		"endpoint_name": &graphql.Field{Type: graphql.String}, // The name of the deployment endpoint.
+		"endpoint_url":  &graphql.Field{Type: graphql.String}, // The URL associated with the endpoint.
+		"endpoint_type": &graphql.Field{Type: graphql.String}, // The type of environment.
+		"environment":   &graphql.Field{Type: graphql.String}, // The general environment.
+		"last_sync":     &graphql.Field{Type: graphql.String}, // The timestamp of the last time this specific release was synced to the endpoint.
+		"status":        &graphql.Field{Type: graphql.String}, // The current status of the endpoint.
 	},
 })
 
+// AffectedReleaseType defines a combination of vulnerability information with release and project metadata, used primarily for the `affectedReleases` query.
 var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "AffectedRelease",
 	Fields: graphql.Fields{
-		"cve_id":                  &graphql.Field{Type: graphql.String},
-		"summary":                 &graphql.Field{Type: graphql.String},
-		"details":                 &graphql.Field{Type: graphql.String},
-		"severity_score":          &graphql.Field{Type: graphql.Float},
-		"severity_rating":         &graphql.Field{Type: graphql.String},
-		"published":               &graphql.Field{Type: graphql.String},
-		"modified":                &graphql.Field{Type: graphql.String},
-		"aliases":                 &graphql.Field{Type: graphql.NewList(graphql.String)},
-		"package":                 &graphql.Field{Type: graphql.String},
-		"affected_version":        &graphql.Field{Type: graphql.String},
-		"full_purl":               &graphql.Field{Type: graphql.String},
-		"fixed_in":                &graphql.Field{Type: graphql.NewList(graphql.String)},
-		"release_name":            &graphql.Field{Type: graphql.String},
-		"release_version":         &graphql.Field{Type: graphql.String},
-		"content_sha":             &graphql.Field{Type: graphql.String},
-		"project_type":            &graphql.Field{Type: graphql.String},
-		"openssf_scorecard_score": &graphql.Field{Type: graphql.Float},
-		"dependency_count":        &graphql.Field{Type: graphql.Int},
-		"synced_endpoint_count":   &graphql.Field{Type: graphql.Int},
+		"cve_id":                  &graphql.Field{Type: graphql.String},                  // The common vulnerability identifier.
+		"summary":                 &graphql.Field{Type: graphql.String},                  // A brief description of the vulnerability.
+		"details":                 &graphql.Field{Type: graphql.String},                  // Full description and technical details.
+		"severity_score":          &graphql.Field{Type: graphql.Float},                   // The base CVSS score.
+		"severity_rating":         &graphql.Field{Type: graphql.String},                  // The human-readable severity rating.
+		"published":               &graphql.Field{Type: graphql.String},                  // Timestamp when the vulnerability was first published.
+		"modified":                &graphql.Field{Type: graphql.String},                  // Timestamp of the last time the vulnerability details were modified.
+		"aliases":                 &graphql.Field{Type: graphql.NewList(graphql.String)}, // Alternative IDs for the vulnerability.
+		"package":                 &graphql.Field{Type: graphql.String},                  // The package URL (PURL) of the vulnerable dependency.
+		"affected_version":        &graphql.Field{Type: graphql.String},                  // The exact version of the package affected in the release.
+		"full_purl":               &graphql.Field{Type: graphql.String},                  // The full PURL including the version and other qualifiers.
+		"fixed_in":                &graphql.Field{Type: graphql.NewList(graphql.String)}, // A list of versions where the package is known to be fixed.
+		"release_name":            &graphql.Field{Type: graphql.String},                  // The name of the affected project release.
+		"release_version":         &graphql.Field{Type: graphql.String},                  // The version of the affected project release.
+		"content_sha":             &graphql.Field{Type: graphql.String},                  // SHA of the release artifact content.
+		"project_type":            &graphql.Field{Type: graphql.String},                  // The type of project (e.g., "docker").
+		"openssf_scorecard_score": &graphql.Field{Type: graphql.Float},                   // The OpenSSF Scorecard score for the project at this release.
+		"dependency_count":        &graphql.Field{Type: graphql.Int},                     // The number of dependencies reported in the release's SBOM.
+		"synced_endpoint_count":   &graphql.Field{Type: graphql.Int},                     // The number of endpoints consuming this specific release.
 	},
 })
 
+// MitigationType defines a summary of a vulnerability across multiple releases, focused on mitigation data like fixed versions, and the total count of affected releases and endpoints.
 var MitigationType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Mitigation",
 	Fields: graphql.Fields{
-		"cve_id":             &graphql.Field{Type: graphql.String},
-		"summary":            &graphql.Field{Type: graphql.String},
-		"severity_score":     &graphql.Field{Type: graphql.Float},
-		"severity_rating":    &graphql.Field{Type: graphql.String},
-		"package":            &graphql.Field{Type: graphql.String},
-		"affected_version":   &graphql.Field{Type: graphql.String},
-		"full_purl":          &graphql.Field{Type: graphql.String},
-		"fixed_in":           &graphql.Field{Type: graphql.NewList(graphql.String)},
-		"affected_releases":  &graphql.Field{Type: graphql.Int},
-		"affected_endpoints": &graphql.Field{Type: graphql.Int},
+		"cve_id":             &graphql.Field{Type: graphql.String},                  // The common vulnerability identifier.
+		"summary":            &graphql.Field{Type: graphql.String},                  // A brief description of the vulnerability.
+		"severity_score":     &graphql.Field{Type: graphql.Float},                   // The highest base CVSS score found for this vulnerability in the affected releases.
+		"severity_rating":    &graphql.Field{Type: graphql.String},                  // The highest human-readable severity rating.
+		"package":            &graphql.Field{Type: graphql.String},                  // The vulnerable package URL (PURL).
+		"affected_version":   &graphql.Field{Type: graphql.String},                  // The specific version of the package that is affected.
+		"full_purl":          &graphql.Field{Type: graphql.String},                  // The full PURL of the affected package version.
+		"fixed_in":           &graphql.Field{Type: graphql.NewList(graphql.String)}, // The versions where the package is known to be fixed.
+		"affected_releases":  &graphql.Field{Type: graphql.Int},                     // The total count of releases that include this specific vulnerable package version.
+		"affected_endpoints": &graphql.Field{Type: graphql.Int},                     // The total count of unique endpoints that are consuming one or more of the affected releases.
 	},
 })
 
@@ -1186,6 +1203,7 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 	return vulnerabilities, nil
 }
 
+// CreateSchema generates and returns the configured GraphQL schema for the API.
 func CreateSchema() (graphql.Schema, error) {
 	rootQuery := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Query",

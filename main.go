@@ -1,3 +1,5 @@
+// package main provides the entry point and API handlers for the CVE2Release-Tracker microservice,
+// including logic for processing releases, SBOMs, handling sync operations, and serving the GraphQL API.
 package main
 
 import (
@@ -515,7 +517,7 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 	if existingReleaseKey != "" {
 		// Release already exists, use existing key
 		releaseID = "release/" + existingReleaseKey
-		req.ProjectRelease.Key = existingReleaseKey
+		req.Key = existingReleaseKey
 	} else {
 		// Save new ProjectRelease to ArangoDB
 		releaseMeta, err := db.Collections["release"].CreateDocument(ctx, req.ProjectRelease)
@@ -526,7 +528,7 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 			})
 		}
 		releaseID = "release/" + releaseMeta.Key
-		req.ProjectRelease.Key = releaseMeta.Key
+		req.Key = releaseMeta.Key
 	}
 
 	// Calculate content hash for SBOM (stored in ContentSha field)
@@ -593,16 +595,20 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 		})
 	}
 
-	// Return success response
-	message := "Release and SBOM created successfully"
-	if existingReleaseKey != "" && existingSBOMKey != "" {
+	// Determine success message based on whether entities already existed (gocritic fix applied here)
+	var message string
+	switch {
+	case existingReleaseKey != "" && existingSBOMKey != "":
 		message = "Release and SBOM already exist (matched by name+version+contentsha and content hash)"
-	} else if existingReleaseKey != "" {
+	case existingReleaseKey != "":
 		message = "Release already exists (matched by name+version+contentsha), SBOM created and linked"
-	} else if existingSBOMKey != "" {
+	case existingSBOMKey != "":
 		message = "SBOM already exists (matched by content hash), Release created and linked"
+	default:
+		message = "Release and SBOM created successfully"
 	}
 
+	// Return success response
 	return c.Status(fiber.StatusCreated).JSON(ReleaseWithSBOMResponse{
 		Success: true,
 		Message: message,

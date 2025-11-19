@@ -249,16 +249,16 @@ func InitializeDatabase() DBConnection {
 
 		// Edge collection indexes for optimized traversals
 		// CRITICAL: These indexes enable O(log n) lookups in hub-spoke queries with 400K+ CVEs
-		
+
 		// release2sbom indexes - for validating release existence
 		{Collection: "release2sbom", IdxName: "release2sbom_from", IdxField: "_from"},
 		{Collection: "release2sbom", IdxName: "release2sbom_to", IdxField: "_to"},
-		
+
 		// sbom2purl indexes - starting point for vulnerability queries (10K edges vs 400K CVEs)
 		{Collection: "sbom2purl", IdxName: "sbom2purl_from", IdxField: "_from"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_to", IdxField: "_to"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_version", IdxField: "version"},
-		
+
 		// cve2purl indexes - THE MOST CRITICAL for 400K CVE performance
 		// The _to index enables O(log n) CVE lookups per PURL instead of O(n) scans
 		{Collection: "cve2purl", IdxName: "cve2purl_from", IdxField: "_from"},

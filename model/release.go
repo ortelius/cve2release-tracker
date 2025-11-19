@@ -46,8 +46,8 @@ type ProjectRelease struct {
 
 	// OpenSSF Scorecard Results (https://github.com/ossf/scorecard)
 	// Uses custom ScorecardAPIResponse struct that matches the API response format
-	OpenSSFScorecardScore float64                `json:"openssf_scorecard_score,omitempty"` // Aggregate score 0-10
-	ScorecardResult       *ScorecardAPIResponse  `json:"scorecard_result,omitempty"`        // Complete result with all checks
+	OpenSSFScorecardScore float64               `json:"openssf_scorecard_score,omitempty"` // Aggregate score 0-10
+	ScorecardResult       *ScorecardAPIResponse `json:"scorecard_result,omitempty"`        // Complete result with all checks
 }
 
 // ScorecardAPIResponse represents the OpenSSF Scorecard API response
