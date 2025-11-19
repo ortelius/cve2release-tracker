@@ -180,7 +180,6 @@ var ScorecardResultType = graphql.NewObject(graphql.ObjectConfig{
 })
 
 // --- End of OpenSSF Scorecard Types ---
-
 var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Release",
 	Fields: graphql.Fields{
@@ -188,12 +187,124 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 		"name":         &graphql.Field{Type: graphql.String},
 		"version":      &graphql.Field{Type: graphql.String},
 		"project_type": &graphql.Field{Type: graphql.String},
-		"content_sha":  &graphql.Field{Type: graphql.String},
-		"git_commit":   &graphql.Field{Type: graphql.String},
-		"git_branch":   &graphql.Field{Type: graphql.String},
-		"docker_repo":  &graphql.Field{Type: graphql.String},
-		"docker_tag":   &graphql.Field{Type: graphql.String},
-		"docker_sha":   &graphql.Field{Type: graphql.String},
+
+		// --- Container Artifact Fields ---
+		"content_sha": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.ContentSha, nil
+		}},
+		"docker_repo": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.DockerRepo, nil
+		}},
+		"docker_tag": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.DockerTag, nil
+		}},
+		"docker_sha": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.DockerSha, nil
+		}},
+		"basename": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.Basename, nil
+		}},
+
+		// --- Git/Source Fields ---
+		"git_commit": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitCommit, nil
+		}},
+		"git_branch": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitBranch, nil
+		}},
+		"git_tag": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitTag, nil
+		}},
+		"git_repo": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitRepo, nil
+		}},
+		"git_org": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitOrg, nil
+		}},
+		"git_url": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitURL, nil
+		}},
+		"git_repo_project": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitRepoProject, nil
+		}},
+		"git_verify_commit": &graphql.Field{Type: graphql.Boolean, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitVerifyCommit, nil
+		}},
+		"git_signed_off_by": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitSignedOffBy, nil
+		}},
+
+		// --- Metrics & Timestamps Fields ---
+		"git_commit_timestamp": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitCommitTimestamp, nil
+		}},
+		"git_commit_authors": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitCommitAuthors, nil
+		}},
+		"git_committerscnt": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitCommittersCnt, nil
+		}},
+		"git_total_committerscnt": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitTotalCommittersCnt, nil
+		}},
+		"git_contrib_percentage": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitContribPercentage, nil
+		}},
+		"git_lines_added": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitLinesAdded, nil
+		}},
+		"git_lines_deleted": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitLinesDeleted, nil
+		}},
+		"git_lines_total": &graphql.Field{Type: graphql.Int, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitLinesTotal, nil
+		}},
+		"git_prev_comp_commit": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.GitPrevCompCommit, nil
+		}},
+
+		// --- Build Environment Fields ---
+		"build_date": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.BuildDate, nil
+		}},
+		"build_id": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.BuildID, nil
+		}},
+		"build_num": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.BuildNum, nil
+		}},
+		"build_url": &graphql.Field{Type: graphql.String, Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+			release, _ := p.Source.(model.ProjectRelease)
+			return release.BuildURL, nil
+		}},
+
+		// --- SBOM/Vulnerabilities ---
 		"sbom": &graphql.Field{
 			Type: SBOMType,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -239,7 +350,40 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				return resolveReleaseVulnerabilities(release.Name, release.Version)
 			},
 		},
-		// --- OpenSSF Scorecard Fields Added ---
+
+		// --- Synced Endpoints ---
+		"synced_endpoint_count": &graphql.Field{
+			Type: graphql.Int,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				release, ok := p.Source.(model.ProjectRelease)
+				if !ok {
+					return 0, nil
+				}
+
+				// 1. Get the list of affected endpoints using the existing resolver logic
+				endpoints, err := resolveAffectedEndpoints(release.Name, release.Version)
+				if err != nil {
+					// Handle the error by returning 0 and the error
+					return 0, err
+				}
+
+				// 2. Calculate the count based on the list length
+				return len(endpoints), nil
+			},
+		},
+		"synced_endpoints": &graphql.Field{
+			Type: graphql.NewList(AffectedEndpointType),
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				release, ok := p.Source.(model.ProjectRelease)
+				if !ok {
+					return nil, nil
+				}
+				// Use the existing resolver function to fetch the list of endpoints
+				return resolveAffectedEndpoints(release.Name, release.Version)
+			},
+		},
+
+		// --- OpenSSF Scorecard Fields ---
 		"openssf_scorecard_score": &graphql.Field{
 			Type: graphql.Float,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -255,7 +399,6 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 				return release.ScorecardResult, nil
 			},
 		},
-		// --- End OpenSSF Scorecard Fields Added ---
 	},
 })
 
@@ -355,51 +498,34 @@ func extractFixedVersions(affected models.Affected) []string {
 
 func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
-
-	// OPTIMIZED: Start from specific release, use indexed lookups
 	query := `
 		FOR release IN release
 			FILTER release.name == @name AND release.version == @version
-			LIMIT 1
-			
-			FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-				FOR purlEdge IN sbom2purl
-					FILTER purlEdge._from == sbomEdge._id
-					LET purl = DOCUMENT(purlEdge._to)
-					FILTER purl != null
-					
+			FOR sbom IN 1..1 OUTBOUND release release2sbom
+				FOR sbomEdge IN sbom2purl
+					FILTER sbomEdge._from == sbom._id
+					LET purl = DOCUMENT(sbomEdge._to)
+					LET packageVersion = sbomEdge.version
+					LET packageFullPurl = sbomEdge.full_purl
 					FOR cve IN 1..1 INBOUND purl cve2purl
-						FILTER cve != null
-						FILTER cve.affected != null
-						
-						// Default missing scores to 0.1
-						LET severity_score = cve.database_specific != null && cve.database_specific.cvss_base_score != null ? 
-							cve.database_specific.cvss_base_score : 0.1
-						
-						LET severity_rating = cve.database_specific != null && cve.database_specific.severity_rating != null ?
-							cve.database_specific.severity_rating : "LOW"
-						
 						FOR affected IN cve.affected
-							FILTER affected != null
-							FILTER affected.package != null
 							LET cveBasePurl = affected.package.purl != null ? 
 								affected.package.purl : 
 								CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
 							FILTER cveBasePurl == purl.purl
-							
 							RETURN {
 								cve_id: cve.id,
 								summary: cve.summary,
 								details: cve.details,
 								severity: cve.severity,
-								severity_score: severity_score,
-								severity_rating: severity_rating,
+								severity_score: cve.database_specific.cvss_base_score,
+								severity_rating: cve.database_specific.severity_rating,
 								published: cve.published,
 								modified: cve.modified,
 								aliases: cve.aliases,
 								package: purl.purl,
-								package_version: purlEdge.version,
-								full_purl: purlEdge.full_purl,
+								package_version: packageVersion,
+								full_purl: packageFullPurl,
 								affected_data: affected
 							}
 	`
@@ -479,82 +605,110 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 	ctx := context.Background()
 	severityScore := util.GetSeverityScore(severity)
 
-	// OPTIMIZED: Use indexed queries and early filtering
 	var query string
-	var bindVars map[string]interface{}
-
 	if severityScore == 0.0 {
-		// For "NONE" severity, return all releases with their dependencies
 		query = `
-			FOR release IN release
-				LET depCount = FIRST(
-					FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-						RETURN sbomEdge.content.components != null ? LENGTH(sbomEdge.content.components) : 0
-				)
-				LET syncCount = LENGTH(
-					FOR sync IN sync
-						FILTER sync.release_name == release.name AND sync.release_version == release.version
-						LIMIT 1
-						RETURN 1
-				)
-				RETURN {
-					cve_id: null,
-					cve_summary: null,
-					cve_details: null,
-					cve_severity_score: null,
-					cve_severity_rating: null,
-					cve_published: null,
-					cve_modified: null,
-					cve_aliases: null,
-					package: null,
-					version: null,
-					full_purl: null,
-					release_name: release.name,
-					release_version: release.version,
-					content_sha: release.contentsha,
-					project_type: release.projecttype,
-					openssf_scorecard_score: release.openssf_scorecard_score,
-					synced_endpoint_count: syncCount,
-					dependency_count: depCount
-				}
+			LET results = (
+				FOR release IN release
+					FOR sbom IN 1..1 OUTBOUND release release2sbom
+						FOR sbomEdge IN sbom2purl
+							FILTER sbomEdge._from == sbom._id
+							LET purl = DOCUMENT(sbomEdge._to)
+							FILTER purl != null
+							LET packageVersion = sbomEdge.version
+							LET packageFullPurl = sbomEdge.full_purl
+							LET cveMatches = (
+								FOR cveEdge IN cve2purl
+									FILTER cveEdge._to == purl._id
+									LET cve = DOCUMENT(cveEdge._from)
+									FILTER cve != null
+									FILTER cve.affected != null
+									FOR affected IN cve.affected
+										LET cveBasePurl = affected.package.purl != null ? 
+											affected.package.purl : 
+											CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+										FILTER cveBasePurl == purl.purl
+										RETURN {
+											cve_id: cve.id,
+											cve_summary: cve.summary,
+											cve_details: cve.details,
+											cve_severity_score: cve.database_specific.cvss_base_score,
+											cve_severity_rating: cve.database_specific.severity_rating,
+											cve_published: cve.published,
+											cve_modified: cve.modified,
+											cve_aliases: cve.aliases,
+											affected_data: affected
+										}
+							)
+							FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
+								LET syncCount = LENGTH(
+									FOR sync IN sync
+										FILTER sync.release_name == release.name 
+										   AND sync.release_version == release.version
+										RETURN 1
+								)
+								LET depCount = (
+									FOR s IN 1..1 OUTBOUND release release2sbom
+										RETURN s.content.components != null ? LENGTH(s.content.components) : 0
+								)[0]
+								RETURN {
+									cve_id: cveMatch != null ? cveMatch.cve_id : null,
+									cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
+									cve_details: cveMatch != null ? cveMatch.cve_details : null,
+									cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
+									cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
+									cve_published: cveMatch != null ? cveMatch.cve_published : null,
+									cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
+									cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
+									affected_data: cveMatch != null ? cveMatch.affected_data : null,
+									package: purl.purl,
+									version: packageVersion,
+									full_purl: packageFullPurl,
+									release_name: release.name,
+									release_version: release.version,
+									content_sha: release.contentsha,
+									project_type: release.projecttype,
+									openssf_scorecard_score: release.openssf_scorecard_score,
+									synced_endpoint_count: syncCount,
+									dependency_count: depCount
+								}
+			)
+			FOR result IN results
+				SORT result.cve_severity_score DESC
+				RETURN result
 		`
-		bindVars = nil
 	} else {
-		// For specific severity levels, filter by severity score
 		query = `
-			FOR release IN release
-				FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-					FOR purlEdge IN sbom2purl
-						FILTER purlEdge._from == sbomEdge._id
-						LET purl = DOCUMENT(purlEdge._to)
-						FILTER purl != null
-						
-						FOR cveEdge IN cve2purl
-							FILTER cveEdge._to == purl._id
-							LET cve = DOCUMENT(cveEdge._from)
-							FILTER cve != null
-							FILTER cve.database_specific != null
-							FILTER cve.database_specific.cvss_base_score >= @severityScore
-							
-							FOR affected IN cve.affected != null ? cve.affected : []
+			LET results = (
+				FOR release IN release
+					FOR sbom IN 1..1 OUTBOUND release release2sbom
+						FOR sbomEdge IN sbom2purl
+							FILTER sbomEdge._from == sbom._id
+							LET purl = DOCUMENT(sbomEdge._to)
+							FILTER purl != null
+							LET packageVersion = sbomEdge.version
+							LET packageFullPurl = sbomEdge.full_purl
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								FILTER cve.database_specific.cvss_base_score >= @severityScore
+							FILTER cve.affected != null
+							FOR affected IN cve.affected
 								LET cveBasePurl = affected.package.purl != null ? 
 									affected.package.purl : 
 									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
 								FILTER cveBasePurl == purl.purl
-								
 								LET syncCount = LENGTH(
 									FOR sync IN sync
-										FILTER sync.release_name == release.name AND sync.release_version == release.version
-										LIMIT 1
+										FILTER sync.release_name == release.name 
+										   AND sync.release_version == release.version
 										RETURN 1
 								)
-								LET depCount = FIRST(
+								LET depCount = (
 									FOR s IN 1..1 OUTBOUND release release2sbom
 										RETURN s.content.components != null ? LENGTH(s.content.components) : 0
-								)
-								
-								SORT cve.database_specific.cvss_base_score DESC
-								
+								)[0]
 								RETURN {
 									cve_id: cve.id,
 									cve_summary: cve.summary,
@@ -566,8 +720,8 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									cve_aliases: cve.aliases,
 									affected_data: affected,
 									package: purl.purl,
-									version: purlEdge.version,
-									full_purl: purlEdge.full_purl,
+									version: packageVersion,
+									full_purl: packageFullPurl,
 									release_name: release.name,
 									release_version: release.version,
 									content_sha: release.contentsha,
@@ -576,15 +730,24 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									synced_endpoint_count: syncCount,
 									dependency_count: depCount
 								}
+			)
+			FOR result IN results
+				SORT result.cve_severity_score DESC
+				RETURN result
 		`
-		bindVars = map[string]interface{}{
-			"severityScore": severityScore,
-		}
 	}
 
-	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
-		BindVars: bindVars,
-	})
+	var cursor arangodb.Cursor
+	var err error
+	if severityScore == 0.0 {
+		cursor, err = db.Database.Query(ctx, query, nil)
+	} else {
+		cursor, err = db.Database.Query(ctx, query, &arangodb.QueryOptions{
+			BindVars: map[string]interface{}{
+				"severityScore": severityScore,
+			},
+		})
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -879,7 +1042,6 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 							FILTER cveEdge._to == purl._id
 							LET cve = DOCUMENT(cveEdge._from)
 							FILTER cve != null
-							FILTER cve.database_specific != null
 							FILTER cve.database_specific.cvss_base_score != null
 							
 							LET affectedMatch = FIRST(
@@ -1021,7 +1183,6 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 			"affected_endpoints": result.AffectedEndpoints,
 		})
 	}
-
 	return vulnerabilities, nil
 }
 
