@@ -751,54 +751,6 @@ func PostSyncWithEndpoint(c *fiber.Ctx) error {
 }
 
 // ============================================================================
-// LIST Handlers
-// ============================================================================
-
-// ListReleases handles GET requests for listing all releases with key, name, and version
-func ListReleases(c *fiber.Ctx) error {
-	ctx := context.Background()
-
-	// Query to get all releases with only key, name, and version
-	query := `
-		FOR r IN release
-			SORT r.name, r.version
-			RETURN {
-				_key: r._key,
-				name: r.name,
-				version: r.version
-			}
-	`
-
-	cursor, err := db.Database.Query(ctx, query, nil)
-	if err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"success": false,
-			"message": "Failed to query releases: " + err.Error(),
-		})
-	}
-	defer cursor.Close()
-
-	var releases []ReleaseListItem
-	for cursor.HasMore() {
-		var release ReleaseListItem
-		_, err := cursor.ReadDocument(ctx, &release)
-		if err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-				"success": false,
-				"message": "Failed to read release: " + err.Error(),
-			})
-		}
-		releases = append(releases, release)
-	}
-
-	return c.Status(fiber.StatusOK).JSON(fiber.Map{
-		"success":  true,
-		"count":    len(releases),
-		"releases": releases,
-	})
-}
-
-// ============================================================================
 // Main
 // ============================================================================
 
@@ -842,11 +794,8 @@ func main() {
 	// GraphQL endpoint - replaces all GET endpoints
 	api.Post("/graphql", GraphQLHandler(schema))
 
-	// LIST endpoints
-	api.Get("/releases", ListReleases)
-
 	// Get port from environment or default to 3000
-	port := os.Getenv("PORT")
+	port := os.Getenv("MS_PORT")
 	if port == "" {
 		port = "3000"
 	}
