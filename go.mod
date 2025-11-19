@@ -4,14 +4,14 @@ go 1.25.0
 
 require (
 	github.com/Masterminds/semver/v3 v3.4.0
-	github.com/anchore/syft v1.36.0
+	github.com/anchore/syft v1.38.0
 	github.com/aquasecurity/go-npm-version v0.0.2
 	github.com/aquasecurity/go-pep440-version v0.0.1
-	github.com/arangodb/go-driver/v2 v2.1.5
+	github.com/arangodb/go-driver/v2 v2.1.6
 	github.com/cenkalti/backoff v2.2.1+incompatible
 	github.com/glebarez/go-sqlite v1.22.0
-	github.com/gofiber/fiber/v2 v2.52.9
-	github.com/google/osv-scanner v1.9.2
+	github.com/gofiber/fiber/v2 v2.52.10
+	github.com/google/osv-scanner/v2 v2.3.0
 	github.com/graphql-go/graphql v0.8.1
 	github.com/package-url/packageurl-go v0.1.3
 	github.com/spf13/cobra v1.10.1
