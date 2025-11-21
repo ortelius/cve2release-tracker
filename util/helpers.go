@@ -1,5 +1,7 @@
 // Package util provides utility functions for working with Package URLs (PURLs),
 // version comparisons for vulnerability checking, and extracting metadata from the environment.
+//
+//revive:disable-next-line:var-naming
 package util
 
 import (
