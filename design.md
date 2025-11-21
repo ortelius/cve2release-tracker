@@ -365,8 +365,7 @@ flowchart TB
     Start["<b>QUERY:</b> Which production endpoints<br/>are running CVE-2024-1234?"] --> Step1
     
     Step1["<b>STEP 1:</b> Start at CVE Document"] --> CVE
-    CVE["CVE-2024-1234<br/>├─ id: CVE-2024-1234<br/>├─ summary: Prototype Pollution<br/>├─ severity_rating: CRITICAL<br/>
-    └─ affected:<br/>    └─ package: pkg:npm/lodash<br/>       versions: 4.17.0-4.17.20"]
+    CVE["CVE-2024-1234<br/>├─ id: CVE-2024-1234<br/>├─ summary: Prototype Pollution<br/>├─ severity_rating: CRITICAL<br/>└─ affected:<br/>    └─ package: pkg:npm/lodash<br/>       versions: 4.17.0-4.17.20"]
     
     CVE -->|CVE2PURL Edge| Step2["<b>STEP 2:</b> Traverse to PURL Hub"]
     Step2 --> PURL["PURL Hub: pkg:npm/lodash<br/>(Unique hub for all lodash refs)"]
@@ -417,8 +416,7 @@ flowchart TB
         W3["pkg:npm/lodash@4.17.21"]
         W4["... (thousands of version-specific nodes)"]
         
-        WProblems["<b>PROBLEMS:</b><br/>- Massive node duplication (1 node per version)<br/>- CVE edges must connect to ALL version nodes<br/>
-        - Harder to query 'all versions of lodash'<br/>- More storage, slower queries"]
+        WProblems["<b>PROBLEMS:</b><br/>- Massive node duplication (1 node per version)<br/>- CVE edges must connect to ALL version nodes<br/>- Harder to query 'all versions of lodash'<br/>- More storage, slower queries"]
     end
     
     subgraph Right["✓ APPROACH 2: Version in Edge Metadata (Implemented)"]
@@ -429,8 +427,7 @@ flowchart TB
         Hub -->|SBOM2PURL Edge #3<br/>version: 4.17.21| S3["SBOM-C"]
         Hub -->|SBOM2PURL Edge #4<br/>version: 4.17.18| S4["SBOM-D"]
         
-        RBenefits["<b>BENEFITS:</b><br/>✓ One PURL node per package (minimal nodes)<br/>✓ CVE connects to one hub (simple edges)<br/>
-        ✓ Version filtering done on edges (fast)<br/>✓ Easy to query 'all versions' or 'specific version'"]
+        RBenefits["<b>BENEFITS:</b><br/>✓ One PURL node per package (minimal nodes)<br/>✓ CVE connects to one hub (simple edges)<br/>✓ Version filtering done on edges (fast)<br/>✓ Easy to query 'all versions' or 'specific version'"]
     end
     
     style Wrong fill:#ffe0e0
@@ -455,8 +452,7 @@ flowchart TB
         WC3["..."] -.-> WS3["..."]
         WC4["CVE-1000"] -.-> WS4["SBOM-10K"]
         
-        WStats["<b>Total Edges:</b> 10,000,000<br/><b>Edge Growth:</b> O(N × M) - Exponential<br/><b>Storage:</b> ~1GB for edges alone<br/>
-        <b>Query Time:</b> Seconds"]
+        WStats["<b>Total Edges:</b> 10,000,000<br/><b>Edge Growth:</b> O(N × M) - Exponential<br/><b>Storage:</b> ~1GB for edges alone<br/><b>Query Time:</b> Seconds"]
     end
     
     subgraph With["WITH HUB (CVE → PURL → SBOM)"]
@@ -470,8 +466,7 @@ flowchart TB
         HHub --> HS3["..."]
         HHub --> HS4["SBOM-10K"]
         
-        HStats["<b>Total Edges:</b> 11,000<br/><b>Edge Growth:</b> O(N + M) - Linear<br/><b>Storage:</b> ~10MB for edges<br/>
-        <b>Query Time:</b> Milliseconds"]
+        HStats["<b>Total Edges:</b> 11,000<br/><b>Edge Growth:</b> O(N + M) - Linear<br/><b>Storage:</b> ~10MB for edges<br/><b>Query Time:</b> Milliseconds"]
     end
     
     Scenario --> Without
@@ -491,24 +486,19 @@ flowchart TB
 
 ```mermaid
 flowchart TB
-    Step1["<b>1. CVE PUBLICATION (OSV.dev)</b><br/>CVE-2024-1234 published for lodash<br/>Affected: 4.17.0 ≤ version ≤ 4.17.20<br/>
-    CVSS: 9.8 (CRITICAL)"]
+    Step1["<b>1. CVE PUBLICATION (OSV.dev)</b><br/>CVE-2024-1234 published for lodash<br/>Affected: 4.17.0 ≤ version ≤ 4.17.20<br/>CVSS: 9.8 (CRITICAL)"]
     
     Step1 -->|Ingestion Pipeline| Step2
     
-    Step2["<b>2. CVE INGESTION</b><br/>Parse OSV data<br/>Extract PURL: pkg:npm/lodash (base form)<br/>Calculate CVSS score: 9.8<br/>
-    Determine severity_rating: CRITICAL<br/>Create CVE document in ArangoDB<br/>Create CVE2PURL edge to lodash hub"]
+    Step2["<b>2. CVE INGESTION</b><br/>Parse OSV data<br/>Extract PURL: pkg:npm/lodash (base form)<br/>Calculate CVSS score: 9.8<br/>Determine severity_rating: CRITICAL<br/>Create CVE document in ArangoDB<br/>Create CVE2PURL edge to lodash hub"]
     
     Step2 -->|Graph Connection| Step3
     
-    Step3["<b>3. PURL HUB</b><br/>Node: pkg:npm/lodash<br/>Connected to:<br/>  ← 15 CVEs (via CVE2PURL edges)<br/>
-      → 1,247 SBOMs (via SBOM2PURL edges)"]
+    Step3["<b>3. PURL HUB</b><br/>Node: pkg:npm/lodash<br/>Connected to:<br/>  ← 15 CVEs (via CVE2PURL edges)<br/>  → 1,247 SBOMs (via SBOM2PURL edges)"]
     
     Step3 -->|SBOM References| Step4
     
-    Step4["<b>4. EXISTING SBOMs</b><br/>SBOM-A: frontend-app → lodash@4.17.20 ✓ VULNERABLE<br/>
-    SBOM-B: api-service → lodash@4.17.19 ✓ VULNERABLE<br/>SBOM-C: worker-svc → lodash@4.17.21 ✗ SAFE (too new)<br/>
-    SBOM-D: auth-service → lodash@4.18.0 ✗ SAFE (too new)"]
+    Step4["<b>4. EXISTING SBOMs</b><br/>SBOM-A: frontend-app → lodash@4.17.20 ✓ VULNERABLE<br/>SBOM-B: api-service → lodash@4.17.19 ✓ VULNERABLE<br/>SBOM-C: worker-svc → lodash@4.17.21 ✗ SAFE (too new)<br/>SBOM-D: auth-service → lodash@4.18.0 ✗ SAFE (too new)"]
     
     Step4 -->|Version Match Filter| Step5
     
@@ -516,16 +506,11 @@ flowchart TB
     
     Step5 -->|SYNC Records| Step6
     
-    Step6["<b>6. DEPLOYED ENDPOINTS</b><br/>frontend-app v1.0:<br/>  ├─ prod-k8s-us-east (cluster, production)<br/>
-      └─ staging-k8s (cluster, staging)<br/>api-service v2.1:<br/>  ├─ prod-lambda-us-west (lambda, production)<br/>
-      └─ prod-ecs-eu-west (ecs, production)"]
+    Step6["<b>6. DEPLOYED ENDPOINTS</b><br/>frontend-app v1.0:<br/>  ├─ prod-k8s-us-east (cluster, production)<br/>  └─ staging-k8s (cluster, staging)<br/>api-service v2.1:<br/>  ├─ prod-lambda-us-west (lambda, production)<br/>  └─ prod-ecs-eu-west (ecs, production)"]
     
     Step6 --> Result
     
-    Result["<b>FINAL RESULT:</b><br/>4 production endpoints running vulnerable code:<br/>1. prod-k8s-us-east (frontend-app v1.0)<br/>
-    2. prod-lambda-us-west (api-service v2.1)<br/>3. prod-ecs-eu-west (api-service v2.1)<br/><br/><b>Security team can now:</b><br/>
-    → Create tickets for remediation<br/>→ Apply patches to these specific endpoints<br/>→ Monitor for exploitation attempts<br/>
-    → Generate compliance reports"]
+    Result["<b>FINAL RESULT:</b><br/>4 production endpoints running vulnerable code:<br/>1. prod-k8s-us-east (frontend-app v1.0)<br/>2. prod-lambda-us-west (api-service v2.1)<br/>3. prod-ecs-eu-west (api-service v2.1)<br/><br/><b>Security team can now:</b><br/>→ Create tickets for remediation<br/>→ Apply patches to these specific endpoints<br/>→ Monitor for exploitation attempts<br/>→ Generate compliance reports"]
     
     style Step1 fill:#ff6b6b
     style Step2 fill:#ffd43b
@@ -701,8 +686,7 @@ flowchart TB
     SBOM3["SBOM-C"] --> REL3["Release:<br/>worker-service v3.0"]
     SBOM4["SBOM-D"] --> REL4["Release:<br/>auth-service v1.5"]
     
-    Result["<b>Query Result:</b><br/>frontend-app v1.0 and auth-service v1.5<br/>are vulnerable<br/>
-    (both use 4.17.20, which falls<br/>in CVE's affected range)"]
+    Result["<b>Query Result:</b><br/>frontend-app v1.0 and auth-service v1.5<br/>are vulnerable<br/>(both use 4.17.20, which falls<br/>in CVE's affected range)"]
     
     style CVE fill:#ff6b6b
     style Hub fill:#4dabf7
@@ -1145,7 +1129,7 @@ flowchart LR
 }
 ```
 
-**AQL Query (Optimized):**
+**AQL Query (AS IMPLEMENTED IN CODE):**
 
 ```aql
 FOR release IN release
@@ -1166,6 +1150,7 @@ FOR release IN release
             cve_id: cve.id,
             summary: cve.summary,
             details: cve.details,
+            severity: cve.severity,
             severity_score: cve.database_specific.cvss_base_score,
             severity_rating: cve.database_specific.severity_rating,
             published: cve.published,
@@ -1177,6 +1162,11 @@ FOR release IN release
             affected_data: affected
           }
 ```
+
+**Key Points:**
+- Version matching is done in Go code after the query using `util.IsVersionAffected()`
+- Query returns candidate CVEs that affect the PURL
+- Go code filters based on actual version ranges
 
 #### Query Releases Affected by Severity
 
@@ -1203,7 +1193,7 @@ flowchart LR
     Release["Release"] --> SBOM["SBOM"]
     SBOM -->|SBOM2PURL<br/>with version| PURL["PURL"]
     PURL --> CVE["CVE"]
-    CVE --> Filter1["Filter:<br/>database_specific<br/>.severity_rating<br/>== 'HIGH'"]
+    CVE --> Filter1["Filter:<br/>database_specific<br/>.cvss_base_score<br/>>= threshold"]
     Filter1 --> Filter2["Validate<br/>version match<br/>in Go"]
     
     style Release fill:#fff0e0
@@ -1214,7 +1204,9 @@ flowchart LR
     style Filter2 fill:#ffd43b
 ```
 
-**AQL Query (Optimized with Better Aggregation):**
+**AQL Query (AS IMPLEMENTED IN CODE):**
+
+For severity filtering (when severityScore > 0):
 
 ```aql
 LET results = (
@@ -1274,12 +1266,106 @@ FOR result IN results
   RETURN result
 ```
 
+For all vulnerabilities (when severityScore == 0):
+
+```aql
+LET results = (
+  FOR release IN release
+    FOR sbom IN 1..1 OUTBOUND release release2sbom
+      FOR sbomEdge IN sbom2purl
+        FILTER sbomEdge._from == sbom._id
+        LET purl = DOCUMENT(sbomEdge._to)
+        FILTER purl != null
+        LET packageVersion = sbomEdge.version
+        LET packageFullPurl = sbomEdge.full_purl
+        LET cveMatches = (
+          FOR cveEdge IN cve2purl
+            FILTER cveEdge._to == purl._id
+            LET cve = DOCUMENT(cveEdge._from)
+            FILTER cve != null
+            FILTER cve.affected != null
+            FOR affected IN cve.affected
+              LET cveBasePurl = affected.package.purl != null ? 
+                affected.package.purl : 
+                CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+              FILTER cveBasePurl == purl.purl
+              RETURN {
+                cve_id: cve.id,
+                cve_summary: cve.summary,
+                cve_details: cve.details,
+                cve_severity_score: cve.database_specific.cvss_base_score,
+                cve_severity_rating: cve.database_specific.severity_rating,
+                cve_published: cve.published,
+                cve_modified: cve.modified,
+                cve_aliases: cve.aliases,
+                affected_data: affected
+              }
+        )
+        FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
+          LET syncCount = LENGTH(
+            FOR sync IN sync
+              FILTER sync.release_name == release.name 
+                 AND sync.release_version == release.version
+              RETURN 1
+          )
+          LET depCount = (
+            FOR s IN 1..1 OUTBOUND release release2sbom
+              RETURN s.content.components != null ? LENGTH(s.content.components) : 0
+          )[0]
+          RETURN {
+            cve_id: cveMatch != null ? cveMatch.cve_id : null,
+            cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
+            cve_details: cveMatch != null ? cveMatch.cve_details : null,
+            cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
+            cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
+            cve_published: cveMatch != null ? cveMatch.cve_published : null,
+            cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
+            cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
+            affected_data: cveMatch != null ? cveMatch.affected_data : null,
+            package: purl.purl,
+            version: packageVersion,
+            full_purl: packageFullPurl,
+            release_name: release.name,
+            release_version: release.version,
+            content_sha: release.contentsha,
+            project_type: release.projecttype,
+            openssf_scorecard_score: release.openssf_scorecard_score,
+            synced_endpoint_count: syncCount,
+            dependency_count: depCount
+          }
+)
+FOR result IN results
+  SORT result.cve_severity_score DESC
+  RETURN result
+```
+
+**Response:**
+
+```json
+{
+  "data": {
+    "affectedReleases": [
+      {
+        "cve_id": "CVE-2024-1234",
+        "severity_score": 9.8,
+        "severity_rating": "CRITICAL",
+        "package": "pkg:npm/lodash",
+        "affected_version": "4.17.20",
+        "release_name": "api-service",
+        "release_version": "2.1.0",
+        "content_sha": "abc123def456",
+        "project_type": "application"
+      }
+    ]
+  }
+}
+```
+
 **Performance:**
 
-- String-based filtering on `severity_rating` is indexed
-- No runtime CVSS parsing required
-- Efficient even with 100,000+ CVEs
+- Numeric filtering on `cvss_base_score` is efficient with proper indexing
 - SORT/LIMIT outside loops for optimal performance
+- Version matching done in Go after query returns
 
 #### Query Endpoints Affected by Severity
 
@@ -1327,7 +1413,7 @@ flowchart TB
     style CVE fill:#ff6b6b
 ```
 
-**AQL Query (Optimized with Direct Endpoint Start):**
+**AQL Query (AS IMPLEMENTED IN CODE - OPTIMIZED):**
 
 ```aql
 FOR endpoint IN endpoint
@@ -1428,6 +1514,11 @@ FOR endpoint IN endpoint
 }
 ```
 
+**Key Optimizations:**
+- Starts from endpoint (not release) for better performance
+- Aggregates vulnerability counts using LENGTH() on filtered arrays
+- Version matching happens in Go code after query (via `util.IsVersionAffected()`)
+
 #### Query Affected Endpoints for a Release
 
 **GraphQL Query:**
@@ -1445,7 +1536,7 @@ query GetAffectedEndpoints($name: String!, $version: String!) {
 }
 ```
 
-**AQL Query (Optimized with Direct Indexed Lookup):**
+**AQL Query (AS IMPLEMENTED IN CODE - OPTIMIZED):**
 
 ```aql
 FOR sync IN sync
@@ -1491,7 +1582,7 @@ query GetVulnerabilities($limit: Int) {
 }
 ```
 
-**AQL Query (Optimized with Proper Aggregation):**
+**AQL Query (AS IMPLEMENTED IN CODE - Optimized with Proper Aggregation):**
 
 ```aql
 LET vulnData = (
@@ -1591,7 +1682,30 @@ FOR vuln IN vulnData
 - **COLLECT/AGGREGATE pattern**: Groups vulnerabilities by CVE + package + version
 - **SORT/LIMIT outside loops**: Ensures proper ordering and pagination
 - **Deduplication**: Removes duplicate entries from multiple paths
-- **Version validation in Go**: Final filtering done post-query for accuracy
+- **Version validation in Go**: Final filtering done post-query for accuracy using `util.IsVersionAffected()`
+
+**Response:**
+
+```json
+{
+  "data": {
+    "vulnerabilities": [
+      {
+        "cve_id": "CVE-2024-1234",
+        "summary": "Prototype pollution vulnerability",
+        "severity_score": 9.8,
+        "severity_rating": "CRITICAL",
+        "package": "pkg:npm/lodash",
+        "affected_version": "4.17.20",
+        "full_purl": "pkg:npm/lodash@4.17.20",
+        "fixed_in": ["4.17.21"],
+        "affected_releases": 15,
+        "affected_endpoints": 23
+      }
+    ]
+  }
+}
+```
 
 ### 5. Severity-Based Impact Analysis
 
@@ -1723,8 +1837,7 @@ jobs:
         run: |
           CRITICAL_VULNS=$(curl -s ${{ secrets.CVE_TRACKER_URL }}/api/v1/graphql \
             -H "Content-Type: application/json" \
-            -d '{"query": "query { release(name: \"'${{ github.event.repository.name }}'\", version: \"'${{ github.sha }}'\") 
-            { vulnerabilities { severity_rating } } }"}' | \
+            -d '{"query": "query { release(name: \"'${{ github.event.repository.name }}'\", version: \"'${{ github.sha }}'\") { vulnerabilities { severity_rating } } }"}' | \
             jq '[.data.release.vulnerabilities[] | select(.severity_rating == "CRITICAL")] | length')
           if [ $CRITICAL_VULNS -gt 0 ]; then
             echo "ERROR: Found $CRITICAL_VULNS critical vulnerabilities"
