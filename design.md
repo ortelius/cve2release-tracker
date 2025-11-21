@@ -2,33 +2,36 @@
 
 ## Executive Summary
 
-Post-Deployment Vulnerability Remediation answers two critical questions for every high-risk OSS vulnerability: **"Where is it running, and how do I fix it?"**
+Post-Deployment Vulnerability Remediation answers critical questions for every high-risk OSS vulnerability: **"What's the threat? Where do I fix it? Where is it running? How do I fix it?"**
 
-The system bridges three key domains:
+The system bridges four key domains:
 
 1. **Vulnerabilities (The Threat)** - CVE data from OSV.dev including affected packages, severity levels, version ranges, and fix information
 2. **Project Releases (Where to Fix It)** - Git repositories, SBOMs, dependencies, binary artifacts, and release metadata from GitHub/GitLab
-3. **Deployment Endpoints (Where It's Running)** - GitOps configurations showing production deployments across cloud providers
+3. **Synced Endpoints (Where It's Running)** - Production deployments across cloud providers, Kubernetes clusters, serverless functions, edge devices, and mission assets
+4. **Mitigations (How to Fix It)** - Actionable remediation guidance including fixed versions, affected releases, deployment impact analysis, and automated issue creation
 
 ### Value Proposition
 
-By connecting vulnerability data with project releases and their deployment locations, the system enables security teams to:
+By connecting vulnerability data with project releases, deployment locations, and remediation paths, the system enables security teams to:
 
 - Immediately identify which production systems are affected by new CVEs
 - Trace vulnerable packages back to source code repositories
 - Determine exact versions that need updating
 - Locate deployment configurations for remediation
-- Prioritize fixes based on actual deployment exposure
+- Prioritize fixes based on actual deployment exposure and severity
+- Generate automated remediation workflows (Jira, GitHub, GitLab issues, AI Auto-remediation)
+- Track mitigation progress across the entire software supply chain
 
 ### Integration Points
 
 **At Setup, Users Connect:**
 
-| Code Repository          | Binary Repository      | GitOps Repository              |
-|--------------------------|------------------------|--------------------------------|
-| GitHub/GitLab repos      | Quay, DockerHub        | GitHub/GitLab deployment repos |
-| SBOMs & dependency files | ArtifactHub, Sonatype  | Cloud provider configs         |
-| Source code & commits    | JFrog, GitHub Packages | Kubernetes/ArgoCD manifests    |
+| Code Repository          | Binary Repository      | Deployment Infrastructure      | Issue Tracking               |
+|--------------------------|------------------------|--------------------------------|------------------------------|
+| GitHub/GitLab repos      | Quay, DockerHub        | Kubernetes clusters            | Jira, GitHub Issues          |
+| SBOMs & dependency files | ArtifactHub, Sonatype  | AWS/Azure/GCP endpoints        | GitLab Issues                |
+| Source code & commits    | JFrog, GitHub Packages | Edge devices, IoT, satellites  | AI Auto-remediation          |
 
 ## Functional Requirements
 
@@ -73,9 +76,27 @@ Users can query the system through GraphQL API endpoints to retrieve vulnerabili
 affected releases and endpoints. Severity-based queries return all releases or endpoints affected by vulnerabilities at a specified severity level (CRITICAL, HIGH, MEDIUM, or LOW). All responses include actionable information such as severity levels, severity ratings, numeric CVSS scores, fix versions, affected packages, endpoint locations, and source repository information. The CLI supports
 exporting SBOMs to files for offline analysis and integration with other tools.
 
+### Mitigation Capabilities
+
+The system provides a comprehensive mitigation view that aggregates vulnerability data across releases and endpoints, showing:
+
+- CVE identification and severity classification
+- Affected package versions and fixed-in versions
+- Count of affected releases and deployed endpoints
+- Ability to select multiple vulnerabilities for bulk action
+- Integration with issue tracking systems (Jira, GitHub Issues, GitLab Issues)
+- AI-powered auto-remediation workflows
+
+This enables security teams to:
+
+- Prioritize remediation based on deployment exposure
+- Create tracking tickets in their preferred issue management system
+- Coordinate fixes across multiple affected releases
+- Track remediation progress to completion
+
 ### Integration Capabilities
 
-The system integrates with GitHub and GitLab repositories to collect source code metadata, build information, and commit histories. Support for multiple binary repositories (Quay, DockerHub, ArtifactHub, Sonatype, JFrog) enables tracking of artifacts through the software supply chain. GitOps repository integration allows the system to understand deployment configurations and identify where
+The system integrates with GitHub and GitLab repositories to collect source code metadata, build information, and commit histories. Support for multiple binary repositories (Quay, DockerHub, ArtifactHub, Sonatype, JFrog) enables tracking of artifacts through the software supply chain. Deployment tracking through sync records allows the system to understand where
 vulnerable code is actually running. Metadata collection works seamlessly in CI/CD environments including GitHub Actions and Jenkins, automatically gathering build numbers, URLs, and timestamps.
 
 ## Non-Functional Requirements
@@ -119,61 +140,122 @@ REST API follows standard HTTP conventions for methods and status codes, with JS
 
 ## Overview
 
-Post-Deployment Vulnerability Remediation is a comprehensive vulnerability management system built in Go that tracks relationships between software releases, their Software Bill of Materials (SBOMs), known CVEs, and deployment endpoints. The system uses a graph database (ArangoDB) to create a hub-and-spoke architecture that enables efficient vulnerability analysis across software components and
-identifies where vulnerable code is running in production.
+Post-Deployment Vulnerability Remediation is a comprehensive vulnerability management system built in Go that tracks relationships between software releases, their Software Bill of Materials (SBOMs), known CVEs, deployment endpoints, and remediation actions. The system uses a graph database (ArangoDB) to create a hub-and-spoke architecture that enables efficient vulnerability analysis across software components and
+identifies where vulnerable code is running in production with actionable remediation paths.
 
-## Data Flow: Answering "Where & How to Fix"
+## Data Flow: Answering the Four Key Questions
 
-### Question 1: "Where is this vulnerability running?"
+### Question 1: "What's the threat?" (Vulnerabilities)
 
 **Data Sources:**
 
-- **Vulnerability Data** (OSV.dev): Package name, affected version ranges, CVSS vectors, severity ratings, CVE ID
-- **Project Release Data** (GitHub/GitLab): Git commits, SBOMs, dependency files, release metadata
-- **Sync Data** (API/Manual): Associations between releases and endpoints showing actual deployments
+- **OSV.dev API**: CVE records with CVSS vectors, affected packages, version ranges
+- **MITRE ATT&CK**: Technique mappings (optional)
+- **CVSS Parser**: Real-time score calculation and severity rating assignment
 
 **Flow:**
 
 ```mermaid
 flowchart LR
-    A[New CVE Alert] --> B[Parse CVSS Vector]
-    B --> C[Calculate Severity Rating]
-    C --> D[Match to PURL Hub]
-    D --> E[Find SBOMs with<br/>affected versions]
-    E --> F[Traverse to Releases]
-    F --> G[Link to Sync Records]
-    G --> H[Identify Endpoints]
+    A[OSV.dev CVE Feed] --> B[Parse CVSS Vector]
+    B --> C[Calculate Base Score]
+    C --> D[Assign Severity Rating<br/>CRITICAL/HIGH/MEDIUM/LOW]
+    D --> E[Store in CVE Collection<br/>with database_specific]
+    E --> F[Create CVE2PURL edges]
     
     style A fill:#ff6b6b
-    style H fill:#51cf66
+    style D fill:#ffd43b
+    style F fill:#4dabf7
 ```
 
-**Result:** Security teams know exactly which cloud endpoints, Kubernetes clusters, edge devices, and mission assets are running the vulnerable code, with precise severity classification.
+**Result:** Security teams can filter and prioritize vulnerabilities by severity, understand attack patterns, and identify affected packages with precise CVSS scoring.
 
-### Question 2: "How do I fix it?"
+### Question 2: "Where do I fix it?" (Project Releases)
 
 **Data Sources:**
 
-- **Fix Information** (OSV.dev): Fixed-in version, patch availability, severity level
-- **Source Location** (GitHub/GitLab): Repository, branch, commit hash, package manager files
-- **Binary Artifacts** (Quay/DockerHub/etc.): Container images, tags, signed artifacts
-- **Release History**: Previous releases, upgrade paths, compatibility information
+- **GitHub/GitLab**: Git commits, branches, tags, metadata
+- **CI/CD Systems**: Build information, timestamps, URLs
+- **SBOM Files**: CycloneDX component inventory
+- **OpenSSF Scorecard**: Security posture scores
 
 **Flow:**
 
 ```mermaid
 flowchart LR
-    A[Identified Vulnerable Release] --> B[Trace to Source Repo]
-    B --> C[Find Fix Version]
-    C --> D[Locate Binary Artifact]
-    D --> E[Identify Sync Records]
-    E --> F[Generate Remediation Plan]
+    A[Release Upload<br/>with SBOM] --> B[Extract Git Metadata]
+    B --> C[Parse SBOM Components]
+    C --> D[Create PURL Hubs<br/>version-free]
+    D --> E[Create Release2SBOM edges]
+    E --> F[Create SBOM2PURL edges<br/>with version metadata]
+    F --> G[Link to CVE2PURL edges]
     
-    style A fill:#ff6b6b
-    style F fill:#51cf66
+    style A fill:#fff0e0
+    style C fill:#69db7c
+    style D fill:#4dabf7
+    style G fill:#ff6b6b
 ```
 
-**Result:** Teams have complete remediation path from source code to production deployment, with severity-based prioritization.
+**Result:** Development teams know which source code repositories, branches, and commits contain vulnerable dependencies, with OpenSSF security scores to prioritize remediation efforts.
+
+### Question 3: "Where is it running?" (Synced Endpoints)
+
+**Data Sources:**
+
+- **Sync API**: Deployment associations (release → endpoint)
+- **Endpoint Registry**: Kubernetes clusters, cloud instances, edge devices, mission assets
+- **Environment Tags**: Production, staging, development classifications
+
+**Flow:**
+
+```mermaid
+flowchart LR
+    A[Sync Record Created] --> B[Link Release to Endpoint]
+    B --> C[Track Deployment Time]
+    C --> D[Classify by Environment<br/>prod/staging/dev]
+    D --> E[Aggregate Vulnerabilities<br/>by Endpoint]
+    E --> F[Calculate Exposure<br/>by Severity]
+    
+    style A fill:#cc5de8
+    style E fill:#ff6b6b
+    style F fill:#ffd43b
+```
+
+**Result:** Operations teams know exactly which production systems, environments, and mission-critical assets are running vulnerable code, with vulnerability counts by severity level.
+
+### Question 4: "How do I fix it?" (Mitigations)
+
+**Data Sources:**
+
+- **Fix Information**: OSV.dev fixed-in versions
+- **Release Aggregation**: Count of affected releases per CVE
+- **Endpoint Aggregation**: Count of affected endpoints per CVE
+- **Issue Tracking**: Jira, GitHub, GitLab integration APIs
+
+**Flow:**
+
+```mermaid
+flowchart LR
+    A[Mitigation View Query] --> B[Aggregate by CVE+Package]
+    B --> C[Count Affected Releases]
+    C --> D[Count Affected Endpoints]
+    D --> E[Extract Fixed-In Versions]
+    E --> F[Present with Actions<br/>Jira/GitHub/GitLab/AI]
+    F --> G[Track Remediation Progress]
+    
+    style A fill:#e3f2fd
+    style C fill:#fff0e0
+    style D fill:#cc5de8
+    style E fill:#51cf66
+    style F fill:#4dabf7
+```
+
+**Result:** Security and development teams have actionable remediation plans with:
+
+- Specific fixed versions to upgrade to
+- Full scope of impact (releases + endpoints)
+- Automated issue creation in their workflow tools
+- Tracking mechanisms to monitor fix deployment
 
 ## Database Structure
 
@@ -420,122 +502,6 @@ flowchart TB
     style Result fill:#ff6b6b
 ```
 
-### Edge Metadata: The Key to Version Tracking
-
-```mermaid
-flowchart TB
-    subgraph Wrong["❌ APPROACH 1: Version in PURL Node (Rejected)"]
-        W1["pkg:npm/lodash@4.17.20"]
-        W2["pkg:npm/lodash@4.17.19"]
-        W3["pkg:npm/lodash@4.17.21"]
-        W4["... (thousands of version-specific nodes)"]
-        
-        WProblems["<b>PROBLEMS:</b><br/>- Massive node duplication (1 node per version)<br/>- CVE edges must connect to ALL version nodes<br/>- Harder to query 'all versions of lodash'<br/>- More storage, slower queries"]
-    end
-    
-    subgraph Right["✓ APPROACH 2: Version in Edge Metadata (Implemented)"]
-        Hub["PURL Hub<br/>pkg:npm/lodash<br/>Single node for package"]
-        
-        Hub -->|SBOM2PURL Edge #1<br/>version: 4.17.20| S1["SBOM-A"]
-        Hub -->|SBOM2PURL Edge #2<br/>version: 4.17.19| S2["SBOM-B"]
-        Hub -->|SBOM2PURL Edge #3<br/>version: 4.17.21| S3["SBOM-C"]
-        Hub -->|SBOM2PURL Edge #4<br/>version: 4.17.18| S4["SBOM-D"]
-        
-        RBenefits["<b>BENEFITS:</b><br/>✓ One PURL node per package (minimal nodes)<br/>✓ CVE connects to one hub (simple edges)<br/>✓ Version filtering done on edges (fast)<br/>✓ Easy to query 'all versions' or 'specific version'"]
-    end
-    
-    style Wrong fill:#ffe0e0
-    style Right fill:#e0ffe0
-    style Hub fill:#4dabf7
-    style WProblems fill:#ff6b6b
-    style RBenefits fill:#51cf66
-```
-
-### Scale Comparison: With vs. Without Hub Architecture
-
-```mermaid
-flowchart TB
-    subgraph Scenario["<b>SCENARIO:</b> 1,000 CVEs affecting lodash across 10,000 SBOMs"]
-    end
-    
-    subgraph Without["WITHOUT HUB (Direct CVE → SBOM edges)"]
-        WC1["CVE-0001"] -.->|10,000 edges| WS1["SBOM-01"]
-        WC1 -.-> WS2["SBOM-02"]
-        WC2["CVE-0002"] -.-> WS1
-        WC2 -.-> WS2
-        WC3["..."] -.-> WS3["..."]
-        WC4["CVE-1000"] -.-> WS4["SBOM-10K"]
-        
-        WStats["<b>Total Edges:</b> 10,000,000<br/><b>Edge Growth:</b> O(N × M) - Exponential<br/><b>Storage:</b> ~1GB for edges alone<br/><b>Query Time:</b> Seconds"]
-    end
-    
-    subgraph With["WITH HUB (CVE → PURL → SBOM)"]
-        HC1["CVE-0001"] --> HHub["PURL HUB<br/>lodash"]
-        HC2["CVE-0002"] --> HHub
-        HC3["..."] --> HHub
-        HC4["CVE-1000"] --> HHub
-        
-        HHub --> HS1["SBOM-01"]
-        HHub --> HS2["SBOM-02"]
-        HHub --> HS3["..."]
-        HHub --> HS4["SBOM-10K"]
-        
-        HStats["<b>Total Edges:</b> 11,000<br/><b>Edge Growth:</b> O(N + M) - Linear<br/><b>Storage:</b> ~10MB for edges<br/><b>Query Time:</b> Milliseconds"]
-    end
-    
-    Scenario --> Without
-    Scenario --> With
-    
-    Without -.->|"<b>REDUCTION:</b><br/>99.89% fewer edges!"| With
-    
-    style Scenario fill:#e3f2fd
-    style Without fill:#ffe0e0
-    style With fill:#e0ffe0
-    style HHub fill:#4dabf7
-    style WStats fill:#ff6b6b
-    style HStats fill:#51cf66
-```
-
-### Real-World Data Flow Example
-
-```mermaid
-flowchart TB
-    Step1["<b>1. CVE PUBLICATION (OSV.dev)</b><br/>CVE-2024-1234 published for lodash<br/>Affected: 4.17.0 ≤ version ≤ 4.17.20<br/>CVSS: 9.8 (CRITICAL)"]
-    
-    Step1 -->|Ingestion Pipeline| Step2
-    
-    Step2["<b>2. CVE INGESTION</b><br/>Parse OSV data<br/>Extract PURL: pkg:npm/lodash (base form)<br/>Calculate CVSS score: 9.8<br/>Determine severity_rating: CRITICAL<br/>Create CVE document in ArangoDB<br/>Create CVE2PURL edge to lodash hub"]
-    
-    Step2 -->|Graph Connection| Step3
-    
-    Step3["<b>3. PURL HUB</b><br/>Node: pkg:npm/lodash<br/>Connected to:<br/>  ← 15 CVEs (via CVE2PURL edges)<br/>  → 1,247 SBOMs (via SBOM2PURL edges)"]
-    
-    Step3 -->|SBOM References| Step4
-    
-    Step4["<b>4. EXISTING SBOMs</b><br/>SBOM-A: frontend-app → lodash@4.17.20 ✓ VULNERABLE<br/>SBOM-B: api-service → lodash@4.17.19 ✓ VULNERABLE<br/>SBOM-C: worker-svc → lodash@4.17.21 ✗ SAFE (too new)<br/>SBOM-D: auth-service → lodash@4.18.0 ✗ SAFE (too new)"]
-    
-    Step4 -->|Version Match Filter| Step5
-    
-    Step5["<b>5. AFFECTED RELEASES</b><br/>frontend-app v1.0 (via SBOM-A)<br/>api-service v2.1 (via SBOM-B)"]
-    
-    Step5 -->|SYNC Records| Step6
-    
-    Step6["<b>6. DEPLOYED ENDPOINTS</b><br/>frontend-app v1.0:<br/>  ├─ prod-k8s-us-east (cluster, production)<br/>  └─ staging-k8s (cluster, staging)<br/>api-service v2.1:<br/>  ├─ prod-lambda-us-west (lambda, production)<br/>  └─ prod-ecs-eu-west (ecs, production)"]
-    
-    Step6 --> Result
-    
-    Result["<b>FINAL RESULT:</b><br/>4 production endpoints running vulnerable code:<br/>1. prod-k8s-us-east (frontend-app v1.0)<br/>2. prod-lambda-us-west (api-service v2.1)<br/>3. prod-ecs-eu-west (api-service v2.1)<br/><br/><b>Security team can now:</b><br/>→ Create tickets for remediation<br/>→ Apply patches to these specific endpoints<br/>→ Monitor for exploitation attempts<br/>→ Generate
-    compliance reports"]
-    
-    style Step1 fill:#ff6b6b
-    style Step2 fill:#ffd43b
-    style Step3 fill:#4dabf7
-    style Step4 fill:#69db7c
-    style Step5 fill:#ffd43b
-    style Step6 fill:#cc5de8
-    style Result fill:#ff6b6b
-```
-
 ### Key Design Features
 
 #### Hub-and-Spoke Architecture (Detailed)
@@ -545,225 +511,6 @@ The system implements a **hub-and-spoke architecture** using PURL (Package URL) 
 **Core Concept:**
 
 Instead of creating direct connections between every CVE and every SBOM component (which would result in exponential edge growth), we use PURL nodes as intermediary hubs. Think of it like an airport hub system: rather than having direct flights between every pair of cities, major airlines route through hub airports, significantly reducing the number of routes needed.
-
-**How It Works:**
-
-```mermaid
-flowchart LR
-    subgraph VulnDomain["VULNERABILITY DOMAIN"]
-        CVE1[CVE-2024-1234]
-        CVE2[CVE-2024-5678]
-        CVE3[CVE-2024-9999]
-    end
-    
-    subgraph HubLayer["HUB LAYER"]
-        Hub["PURL Hub<br/>pkg:npm/lodash<br/>(Base Package)"]
-    end
-    
-    subgraph ReleaseDomain["RELEASE DOMAIN"]
-        SBOM1["SBOM-A<br/>(v4.17.20)"]
-        SBOM2["SBOM-B<br/>(v4.17.19)"]
-        SBOM3["SBOM-C<br/>(v4.17.21)"]
-    end
-    
-    CVE1 & CVE2 & CVE3 -->|Multiple CVEs<br/>affecting same package| Hub
-    Hub -->|Single hub node<br/>for all lodash CVEs| SBOM1 & SBOM2 & SBOM3
-    
-    Note1["Multiple SBOMs using<br/>different versions"]
-    
-    style VulnDomain fill:#ffe0e0
-    style HubLayer fill:#4dabf7
-    style ReleaseDomain fill:#e0ffe0
-```
-
-**The Three-Layer Architecture:**
-
-1. **CVE Layer (Spoke)**: Vulnerability nodes containing CVE data
-   - Each CVE references affected packages generically (without versions)
-   - Links to PURL hubs via `CVE2PURL` edges
-   - Example: CVE-2024-1234 affects "lodash" (any vulnerable version)
-
-2. **PURL Hub Layer (Hub)**: Package identifier nodes
-   - Each PURL node represents a unique package (without version)
-   - Stored as base PURL: `pkg:npm/lodash` (no version component)
-   - Acts as a connection point between CVEs and SBOMs
-   - Dramatically reduces edge count: N CVEs + M SBOMs = N+M edges (not N×M)
-
-3. **SBOM Layer (Spoke)**: Software Bill of Materials with version data
-   - Each SBOM contains specific package versions
-   - Links to PURL hubs via `SBOM2PURL` edges
-   - Edge metadata stores the specific version: `4.17.20`
-   - Multiple SBOMs can reference the same PURL hub with different versions
-
-**Mathematical Advantage:**
-
-- **Without Hub Architecture**: Direct CVE → SBOM connections
-  - For 1,000 CVEs affecting 10,000 SBOMs: up to 10,000,000 edges
-  - Exponential growth: O(N × M)
-
-- **With Hub Architecture**: CVE → PURL → SBOM connections
-  - For same scenario: 1,000 CVE→PURL edges + 10,000 PURL→SBOM edges = 11,000 edges
-  - Linear growth: O(N + M)
-
-**Query Flow Example:**
-
-When asking "Which releases are affected by CVE-2024-1234?", the system:
-
-```mermaid
-flowchart TB
-    Start["1. Start: CVE-2024-1234 document"] --> Trav1
-    Trav1["2. Traverse: CVE2PURL edge<br/>to find PURL hub"] --> Result1
-    Result1["→ Result: pkg:npm/lodash"] --> Trav2
-    Trav2["3. Traverse: SBOM2PURL edges<br/>FROM the PURL hub"] --> Result2
-    Result2["→ Result: All SBOMs using lodash<br/>(with version metadata on edges)"] --> Filter
-    Filter["4. Filter: Check version ranges<br/>in Go code"] --> Result3
-    Result3["→ Keep only: versions 4.17.0 - 4.17.20<br/>(vulnerable range)"] --> Trav3
-    Trav3["5. Traverse: RELEASE2SBOM edges<br/>to find releases"] --> Result4
-    Result4["→ Result: All releases using<br/>vulnerable lodash versions"] --> Trav4
-    Trav4["6. Traverse: SYNC edges<br/>to find endpoints"] --> Result5
-    Result5["→ Result: Production endpoints<br/>running vulnerable code"]
-    
-    style Start fill:#e3f2fd
-    style Result1 fill:#4dabf7
-    style Result2 fill:#69db7c
-    style Result3 fill:#ffd43b
-    style Result4 fill:#fff3bf
-    style Result5 fill:#cc5de8
-```
-
-**Version Matching Strategy:**
-
-The hub-and-spoke design separates version-agnostic package identification from version-specific matching:
-
-- **PURL Hub**: Stores `pkg:npm/lodash` (version-agnostic identifier)
-- **Edge Metadata**: Stores `version: "4.17.20"` on SBOM2PURL edge
-- **CVE Data**: Contains version ranges in `affected` field
-- **Runtime Matching**: Go code compares edge version against CVE ranges
-
-This separation enables:
-
-- ✅ Efficient storage (one PURL node per package, not per version)
-- ✅ Fast hub identification (CVE → PURL lookup is instant)
-- ✅ Precise version filtering (metadata on edges, not on nodes)
-- ✅ Flexible version semantics (npm, PyPI, Maven, etc. all supported)
-
-**Deduplication Benefits:**
-
-```mermaid
-flowchart TB
-    subgraph Scenario["Scenario: 3 releases all use the same dependencies"]
-    end
-    
-    subgraph Without["WITHOUT HUB ARCHITECTURE"]
-        RA["Release-A"] --> D1["500 dependency nodes"]
-        RB["Release-B"] --> D2["500 dependency nodes<br/>(DUPLICATED)"]
-        RC["Release-C"] --> D3["500 dependency nodes<br/>(DUPLICATED)"]
-        
-        WStats["Total: 1,500 nodes<br/>+ CVE edges to each<br/>= massive duplication"]
-    end
-    
-    subgraph With["WITH HUB ARCHITECTURE"]
-        RA2["Release-A"] --> SBOM["SBOM-X"]
-        RB2["Release-B"] --> SBOM
-        RC2["Release-C"] --> SBOM
-        SBOM --> HubSet["500 PURL hubs"]
-        CVEs["CVEs"] --> HubSet
-        
-        WStats2["Total: 1 SBOM + 500 PURLs (reused)<br/>= 501 nodes"]
-    end
-    
-    Scenario --> Without
-    Scenario --> With
-    
-    style Without fill:#ffe0e0
-    style With fill:#e0ffe0
-    style WStats fill:#ff6b6b
-    style WStats2 fill:#51cf66
-```
-
-**Real-World Example:**
-
-Consider a vulnerability in `lodash@4.17.20`:
-
-```mermaid
-flowchart TB
-    CVE["CVE-2024-1234<br/>'Prototype Pollution in lodash'"]
-    
-    CVE -->|CVE2PURL edge| Hub["PURL Hub: pkg:npm/lodash"]
-    
-    Hub -->|SBOM2PURL<br/>version: 4.17.20| SBOM1
-    Hub -->|SBOM2PURL<br/>version: 4.17.19| SBOM2
-    Hub -->|SBOM2PURL<br/>version: 4.17.21| SBOM3
-    Hub -->|SBOM2PURL<br/>version: 4.17.20| SBOM4
-    
-    SBOM1["SBOM-A"] --> REL1["Release:<br/>frontend-app v1.0"]
-    SBOM2["SBOM-B"] --> REL2["Release:<br/>api-service v2.1"]
-    SBOM3["SBOM-C"] --> REL3["Release:<br/>worker-service v3.0"]
-    SBOM4["SBOM-D"] --> REL4["Release:<br/>auth-service v1.5"]
-    
-    Result["<b>Query Result:</b><br/>frontend-app v1.0 and auth-service v1.5<br/>are vulnerable<br/>(both use 4.17.20, which falls<br/>in CVE's affected range)"]
-    
-    style CVE fill:#ff6b6b
-    style Hub fill:#4dabf7
-    style SBOM1 fill:#51cf66
-    style SBOM2 fill:#69db7c
-    style SBOM3 fill:#69db7c
-    style SBOM4 fill:#51cf66
-    style REL1 fill:#ff6b6b
-    style REL4 fill:#ff6b6b
-    style Result fill:#fff3bf
-```
-
-**References & Standards:**
-
-This hub-and-spoke pattern follows established graph database practices:
-
-1. **ArangoDB Graph Pattern**: Uses named edge collections for typed relationships
-   - Documentation: <https://docs.arangodb.com/stable/graphs/>
-   - Our implementation: `CVE2PURL`, `SBOM2PURL`, `RELEASE2SBOM` edge collections
-
-2. **Package URL (PURL) Specification**: Standardized package identifiers
-   - Spec: <https://github.com/package-url/purl-spec>
-   - Format: `scheme:type/namespace/name@version?qualifiers#subpath`
-   - Our hubs use: `pkg:npm/lodash` (base form without version/qualifiers)
-
-3. **OSV Schema**: Open Source Vulnerability format
-   - Spec: <https://ossf.github.io/osv-schema/>
-   - CVE data includes affected packages as PURLs
-   - Our edges connect OSV PURLs to SBOM component PURLs
-
-4. **CycloneDX SBOM**: Industry standard for software bill of materials
-   - Spec: <https://cyclonedx.org/specification/overview/>
-   - Components include PURL identifiers with versions
-   - Our SBOM2PURL edges extract these PURLs
-
-5. **Graph Database Hub Pattern**: Documented in graph theory literature
-   - Neo4j: "Intermediate Node Pattern" for reducing fan-out
-   - TigerGraph: "Hub Vertices" for centralized connections
-   - Our adaptation: PURL nodes as package-level hubs
-
-**Performance Characteristics:**
-
-| Operation              | Complexity   | Example Time             |
-|------------------------|--------------|--------------------------|
-| CVE → PURL lookup      | O(1)         | <1ms                     |
-| PURL → SBOMs traversal | O(log N)     | <10ms for 10K SBOMs      |
-| Version filtering      | O(M)         | <50ms for 500 components |
-| Full CVE impact query  | O(log N + M) | <1s for 100K CVEs        |
-
-**Alternative Architectures Considered:**
-
-1. **Direct CVE-to-SBOM edges**: Rejected due to exponential edge growth
-2. **Version-specific PURL nodes**: Rejected due to excessive node duplication
-3. **Denormalized CVE data in SBOMs**: Rejected due to update complexity
-4. **Separate graphs per ecosystem**: Rejected due to cross-ecosystem queries
-
-The hub-and-spoke architecture provides the optimal balance of:
-
-- Query performance (indexed hub lookups)
-- Storage efficiency (minimal duplication)
-- Version flexibility (edge metadata)
-- Query simplicity (bidirectional traversal)
 
 **Version Storage Strategy**: While PURL nodes store base package identifiers without versions (e.g., `pkg:npm/lodash`), the SBOM2PURL edges store specific version information (e.g., `4.17.20`). This enables accurate vulnerability matching where CVEs specify affected version ranges.
 
@@ -956,40 +703,6 @@ flowchart TB
     style Upsert fill:#51cf66
 ```
 
-**CVSS Parsing Logic:**
-
-```go
-// From updated main.go
-func calculateCVSSScore(vectorStr string) float64 {
-    if strings.HasPrefix(vectorStr, "CVSS:3.1") || strings.HasPrefix(vectorStr, "CVSS:3.0") {
-        cvss31, err := gocvss31.ParseVector(vectorStr)
-        if err == nil {
-            return cvss31.BaseScore()
-        }
-    }
-    if strings.HasPrefix(vectorStr, "CVSS:4.0") {
-        cvss40, err := gocvss40.ParseVector(vectorStr)
-        if err == nil {
-            return cvss40.Score()
-        }
-    }
-    return 0
-}
-
-func getSeverityRating(score float64) string {
-    if score >= 9.0 {
-        return "CRITICAL"
-    } else if score >= 7.0 {
-        return "HIGH"
-    } else if score >= 4.0 {
-        return "MEDIUM"
-    } else if score > 0.0 {
-        return "LOW"
-    }
-    return "NONE"
-}
-```
-
 ### 2. Release and SBOM Upload
 
 **API Endpoint:**
@@ -1037,16 +750,6 @@ flowchart TB
     style Start fill:#e3f2fd
     style Validate fill:#fff3bf
     style Response fill:#51cf66
-```
-
-**Response:**
-
-```json
-{
-  "success": true,
-  "message": "Release created successfully",
-  "release_key": "12345"
-}
 ```
 
 ### 3. Endpoint Sync
@@ -1121,69 +824,6 @@ flowchart LR
     style Filter fill:#ffd43b
 ```
 
-**Response:**
-
-```json
-{
-  "data": {
-    "release": {
-      "name": "my-service",
-      "version": "1.0.0",
-      "vulnerabilities": [
-        {
-          "cve_id": "CVE-2024-1234",
-          "severity_score": 9.8,
-          "severity_rating": "CRITICAL",
-          "package": "pkg:npm/lodash",
-          "affected_version": "4.17.20",
-          "summary": "Prototype pollution vulnerability"
-        }
-      ]
-    }
-  }
-}
-```
-
-**AQL Query (AS IMPLEMENTED IN CODE):**
-
-```aql
-FOR release IN release
-  FILTER release.name == @name AND release.version == @version
-  FOR sbom IN 1..1 OUTBOUND release release2sbom
-    FOR sbomEdge IN sbom2purl
-      FILTER sbomEdge._from == sbom._id
-      LET purl = DOCUMENT(sbomEdge._to)
-      LET packageVersion = sbomEdge.version
-      LET packageFullPurl = sbomEdge.full_purl
-      FOR cve IN 1..1 INBOUND purl cve2purl
-        FOR affected IN cve.affected
-          LET cveBasePurl = affected.package.purl != null ? 
-            affected.package.purl : 
-            CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-          FILTER cveBasePurl == purl.purl
-          RETURN {
-            cve_id: cve.id,
-            summary: cve.summary,
-            details: cve.details,
-            severity: cve.severity,
-            severity_score: cve.database_specific.cvss_base_score,
-            severity_rating: cve.database_specific.severity_rating,
-            published: cve.published,
-            modified: cve.modified,
-            aliases: cve.aliases,
-            package: purl.purl,
-            package_version: packageVersion,
-            full_purl: packageFullPurl,
-            affected_data: affected
-          }
-```
-
-**Key Points:**
-
-- Version matching is done in Go code after the query using `util.IsVersionAffected()`
-- Query returns candidate CVEs that affect the PURL
-- Go code filters based on actual version ranges
-
 #### Query Releases Affected by Severity
 
 **GraphQL Query:**
@@ -1202,340 +842,6 @@ query GetAffectedReleases($severity: Severity!, $limit: Int) {
 }
 ```
 
-**Graph Traversal (Optimized):**
-
-```mermaid
-flowchart LR
-    Release["Release"] --> SBOM["SBOM"]
-    SBOM -->|SBOM2PURL<br/>with version| PURL["PURL"]
-    PURL --> CVE["CVE"]
-    CVE --> Filter1["Filter:<br/>database_specific<br/>.cvss_base_score<br/>>= threshold"]
-    Filter1 --> Filter2["Validate<br/>version match<br/>in Go"]
-    
-    style Release fill:#fff0e0
-    style SBOM fill:#69db7c
-    style PURL fill:#4dabf7
-    style CVE fill:#ff6b6b
-    style Filter1 fill:#ffd43b
-    style Filter2 fill:#ffd43b
-```
-
-**AQL Query (AS IMPLEMENTED IN CODE):**
-
-For severity filtering (when severityScore > 0):
-
-```aql
-LET results = (
-  FOR release IN release
-    FOR sbom IN 1..1 OUTBOUND release release2sbom
-      FOR sbomEdge IN sbom2purl
-        FILTER sbomEdge._from == sbom._id
-        LET purl = DOCUMENT(sbomEdge._to)
-        FILTER purl != null
-        LET packageVersion = sbomEdge.version
-        LET packageFullPurl = sbomEdge.full_purl
-        FOR cveEdge IN cve2purl
-          FILTER cveEdge._to == purl._id
-          LET cve = DOCUMENT(cveEdge._from)
-          FILTER cve != null
-          FILTER cve.database_specific.cvss_base_score >= @severityScore
-          FILTER cve.affected != null
-          FOR affected IN cve.affected
-            LET cveBasePurl = affected.package.purl != null ? 
-              affected.package.purl : 
-              CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-            FILTER cveBasePurl == purl.purl
-            LET syncCount = LENGTH(
-              FOR sync IN sync
-                FILTER sync.release_name == release.name 
-                   AND sync.release_version == release.version
-                RETURN 1
-            )
-            LET depCount = (
-              FOR s IN 1..1 OUTBOUND release release2sbom
-                RETURN s.content.components != null ? LENGTH(s.content.components) : 0
-            )[0]
-            RETURN {
-              cve_id: cve.id,
-              cve_summary: cve.summary,
-              cve_details: cve.details,
-              cve_severity_score: cve.database_specific.cvss_base_score,
-              cve_severity_rating: cve.database_specific.severity_rating,
-              cve_published: cve.published,
-              cve_modified: cve.modified,
-              cve_aliases: cve.aliases,
-              affected_data: affected,
-              package: purl.purl,
-              version: packageVersion,
-              full_purl: packageFullPurl,
-              release_name: release.name,
-              release_version: release.version,
-              content_sha: release.contentsha,
-              project_type: release.projecttype,
-              openssf_scorecard_score: release.openssf_scorecard_score,
-              synced_endpoint_count: syncCount,
-              dependency_count: depCount
-            }
-)
-FOR result IN results
-  SORT result.cve_severity_score DESC
-  RETURN result
-```
-
-For all vulnerabilities (when severityScore == 0):
-
-```aql
-LET results = (
-  FOR release IN release
-    FOR sbom IN 1..1 OUTBOUND release release2sbom
-      FOR sbomEdge IN sbom2purl
-        FILTER sbomEdge._from == sbom._id
-        LET purl = DOCUMENT(sbomEdge._to)
-        FILTER purl != null
-        LET packageVersion = sbomEdge.version
-        LET packageFullPurl = sbomEdge.full_purl
-        LET cveMatches = (
-          FOR cveEdge IN cve2purl
-            FILTER cveEdge._to == purl._id
-            LET cve = DOCUMENT(cveEdge._from)
-            FILTER cve != null
-            FILTER cve.affected != null
-            FOR affected IN cve.affected
-              LET cveBasePurl = affected.package.purl != null ? 
-                affected.package.purl : 
-                CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-              FILTER cveBasePurl == purl.purl
-              RETURN {
-                cve_id: cve.id,
-                cve_summary: cve.summary,
-                cve_details: cve.details,
-                cve_severity_score: cve.database_specific.cvss_base_score,
-                cve_severity_rating: cve.database_specific.severity_rating,
-                cve_published: cve.published,
-                cve_modified: cve.modified,
-                cve_aliases: cve.aliases,
-                affected_data: affected
-              }
-        )
-        FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
-          LET syncCount = LENGTH(
-            FOR sync IN sync
-              FILTER sync.release_name == release.name 
-                 AND sync.release_version == release.version
-              RETURN 1
-          )
-          LET depCount = (
-            FOR s IN 1..1 OUTBOUND release release2sbom
-              RETURN s.content.components != null ? LENGTH(s.content.components) : 0
-          )[0]
-          RETURN {
-            cve_id: cveMatch != null ? cveMatch.cve_id : null,
-            cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
-            cve_details: cveMatch != null ? cveMatch.cve_details : null,
-            cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
-            cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
-            cve_published: cveMatch != null ? cveMatch.cve_published : null,
-            cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
-            cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
-            affected_data: cveMatch != null ? cveMatch.affected_data : null,
-            package: purl.purl,
-            version: packageVersion,
-            full_purl: packageFullPurl,
-            release_name: release.name,
-            release_version: release.version,
-            content_sha: release.contentsha,
-            project_type: release.projecttype,
-            openssf_scorecard_score: release.openssf_scorecard_score,
-            synced_endpoint_count: syncCount,
-            dependency_count: depCount
-          }
-)
-FOR result IN results
-  SORT result.cve_severity_score DESC
-  RETURN result
-```
-
-**Response:**
-
-```json
-{
-  "data": {
-    "affectedReleases": [
-      {
-        "cve_id": "CVE-2024-1234",
-        "severity_score": 9.8,
-        "severity_rating": "CRITICAL",
-        "package": "pkg:npm/lodash",
-        "affected_version": "4.17.20",
-        "release_name": "api-service",
-        "release_version": "2.1.0",
-        "content_sha": "abc123def456",
-        "project_type": "application"
-      }
-    ]
-  }
-}
-```
-
-**Performance:**
-
-- Numeric filtering on `cvss_base_score` is efficient with proper indexing
-- SORT/LIMIT outside loops for optimal performance
-- Version matching done in Go after query returns
-
-#### Query Endpoints Affected by Severity
-
-**GraphQL Query:**
-
-```graphql
-query GetSyncedEndpoints($limit: Int) {
-  syncedEndpoints(limit: $limit) {
-    endpoint_name
-    endpoint_url
-    endpoint_type
-    environment
-    status
-    last_sync
-    release_count
-    total_vulnerabilities {
-      critical
-      high
-      medium
-      low
-    }
-    releases {
-      release_name
-      release_version
-    }
-  }
-}
-```
-
-**Graph Traversal:**
-
-```mermaid
-flowchart TB
-    Endpoint["Endpoint"] --> Sync["Sync Records"]
-    Sync --> Release["Release"]
-    Release --> SBOM["SBOM"]
-    SBOM -->|SBOM2PURL<br/>with version| PURL["PURL"]
-    PURL --> CVE["CVE<br/>(aggregate by<br/>severity_rating)"]
-    
-    style Endpoint fill:#cc5de8
-    style Sync fill:#fff3bf
-    style Release fill:#fff0e0
-    style SBOM fill:#69db7c
-    style PURL fill:#4dabf7
-    style CVE fill:#ff6b6b
-```
-
-**AQL Query (AS IMPLEMENTED IN CODE - OPTIMIZED):**
-
-```aql
-FOR endpoint IN endpoint
-  LET syncs = (
-    FOR sync IN sync
-      FILTER sync.endpoint_name == endpoint.name
-      RETURN {
-        release_name: sync.release_name,
-        release_version: sync.release_version,
-        synced_at: sync.synced_at
-      }
-  )
-  FILTER LENGTH(syncs) > 0
-  
-  LET latestSync = MAX(syncs[*].synced_at)
-  
-  LET vulnCounts = (
-    FOR sync IN syncs
-      FOR release IN release
-        FILTER release.name == sync.release_name AND release.version == sync.release_version
-        LIMIT 1
-        
-        FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-          FOR purlEdge IN sbom2purl
-            FILTER purlEdge._from == sbomEdge._id
-            LET purl = DOCUMENT(purlEdge._to)
-            FILTER purl != null
-            
-            FOR cveEdge IN cve2purl
-              FILTER cveEdge._to == purl._id
-              LET cve = DOCUMENT(cveEdge._from)
-              FILTER cve != null
-              FILTER cve.database_specific != null
-              FILTER cve.database_specific.severity_rating != null
-              
-              FOR affected IN cve.affected != null ? cve.affected : []
-                LET cveBasePurl = affected.package.purl != null ? 
-                  affected.package.purl : 
-                  CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-                FILTER cveBasePurl == purl.purl
-                
-                RETURN {
-                  severity_rating: cve.database_specific.severity_rating,
-                  package_version: purlEdge.version,
-                  affected_data: affected
-                }
-  )
-  
-  LIMIT @limit
-  
-  RETURN {
-    endpoint_name: endpoint.name,
-    endpoint_url: endpoint.name,
-    endpoint_type: endpoint.endpoint_type,
-    environment: endpoint.environment,
-    status: "active",
-    last_sync: latestSync != null ? latestSync : DATE_ISO8601(DATE_NOW()),
-    release_count: LENGTH(syncs),
-    total_vulnerabilities: {
-      critical: LENGTH(FOR v IN vulnCounts FILTER LOWER(v.severity_rating) == "critical" RETURN 1),
-      high: LENGTH(FOR v IN vulnCounts FILTER LOWER(v.severity_rating) == "high" RETURN 1),
-      medium: LENGTH(FOR v IN vulnCounts FILTER LOWER(v.severity_rating) == "medium" RETURN 1),
-      low: LENGTH(FOR v IN vulnCounts FILTER LOWER(v.severity_rating) == "low" RETURN 1)
-    },
-    releases: syncs
-  }
-```
-
-**Response:**
-
-```json
-{
-  "data": {
-    "syncedEndpoints": [
-      {
-        "endpoint_name": "prod-k8s-us-east",
-        "endpoint_url": "prod-k8s-us-east",
-        "endpoint_type": "cluster",
-        "environment": "production",
-        "status": "active",
-        "last_sync": "2024-01-20T14:22:00Z",
-        "release_count": 12,
-        "total_vulnerabilities": {
-          "critical": 2,
-          "high": 8,
-          "medium": 15,
-          "low": 23
-        },
-        "releases": [
-          {
-            "release_name": "api-service",
-            "release_version": "2.1.0"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-**Key Optimizations:**
-
-- Starts from endpoint (not release) for better performance
-- Aggregates vulnerability counts using LENGTH() on filtered arrays
-- Version matching happens in Go code after query (via `util.IsVersionAffected()`)
-
 #### Query Affected Endpoints for a Release
 
 **GraphQL Query:**
@@ -1552,31 +858,6 @@ query GetAffectedEndpoints($name: String!, $version: String!) {
   }
 }
 ```
-
-**AQL Query (AS IMPLEMENTED IN CODE - OPTIMIZED):**
-
-```aql
-FOR sync IN sync
-  FILTER sync.release_name == @name AND sync.release_version == @version
-  FOR endpoint IN endpoint
-    FILTER endpoint.name == sync.endpoint_name
-    LIMIT 1
-    RETURN {
-      endpoint_name: endpoint.name,
-      endpoint_url: endpoint.name,
-      endpoint_type: endpoint.endpoint_type,
-      environment: endpoint.environment,
-      last_sync: sync.synced_at,
-      status: "active"
-    }
-```
-
-**Performance Benefits:**
-
-- Direct indexed lookup on composite `sync.release_name + release_version`
-- No unnecessary graph traversals
-- O(log N) complexity instead of O(N)
-- Typical response time: <50ms for 100K sync records
 
 #### Query All Vulnerabilities (Mitigations View)
 
@@ -1598,108 +879,6 @@ query GetVulnerabilities($limit: Int) {
   }
 }
 ```
-
-**AQL Query (AS IMPLEMENTED IN CODE - Optimized with Proper Aggregation):**
-
-```aql
-LET vulnData = (
-  FOR release IN release
-    FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-      FOR purlEdge IN sbom2purl
-        FILTER purlEdge._from == sbomEdge._id
-        LET purl = DOCUMENT(purlEdge._to)
-        FILTER purl != null
-        
-        FOR cveEdge IN cve2purl
-          FILTER cveEdge._to == purl._id
-          LET cve = DOCUMENT(cveEdge._from)
-          FILTER cve != null
-          FILTER cve.database_specific.cvss_base_score != null
-          
-          LET affectedMatch = FIRST(
-            FOR affected IN cve.affected != null ? cve.affected : []
-              FILTER affected.package != null
-              LET cveBasePurl = affected.package.purl != null ? 
-                affected.package.purl : 
-                CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-              FILTER cveBasePurl == purl.purl
-              LIMIT 1
-              RETURN affected
-          )
-          
-          FILTER affectedMatch != null
-          
-          LET fixedVersions = (
-            FOR vrange IN affectedMatch.ranges != null ? affectedMatch.ranges : []
-              FOR event IN vrange.events != null ? vrange.events : []
-                FILTER event.fixed != null AND event.fixed != ""
-                RETURN DISTINCT event.fixed
-          )
-          
-          RETURN {
-            cve_id: cve.id,
-            package: purl.purl,
-            affected_version: purlEdge.version,
-            full_purl: purlEdge.full_purl,
-            summary: cve.summary,
-            severity_score: cve.database_specific.cvss_base_score,
-            severity_rating: cve.database_specific.severity_rating,
-            fixed_in: fixedVersions,
-            release_name: release.name,
-            release_version: release.version,
-            affected_data: affectedMatch
-          }
-)
-
-FOR vuln IN vulnData
-  COLLECT 
-    cve_id = vuln.cve_id,
-    package = vuln.package,
-    affected_version = vuln.affected_version
-  AGGREGATE 
-    summaries = UNIQUE(vuln.summary),
-    severity_scores = UNIQUE(vuln.severity_score),
-    severity_ratings = UNIQUE(vuln.severity_rating),
-    releaseList = UNIQUE(CONCAT(vuln.release_name, ":", vuln.release_version)),
-    full_purls = UNIQUE(vuln.full_purl),
-    all_fixed_in = UNIQUE(vuln.fixed_in),
-    all_affected_data = UNIQUE(vuln.affected_data)
-  
-  LET endpointCount = LENGTH(
-    FOR rel_str IN releaseList
-      LET parts = SPLIT(rel_str, ":")
-      FOR sync IN sync
-        FILTER sync.release_name == parts[0] AND sync.release_version == parts[1]
-        LIMIT 1
-        RETURN 1
-  )
-  
-  LET max_severity_score = MAX(severity_scores)
-  
-  SORT max_severity_score DESC
-  LIMIT @limit
-  
-  RETURN {
-    cve_id: cve_id,
-    summary: FIRST(summaries) != null ? FIRST(summaries) : "",
-    severity_score: max_severity_score,
-    severity_rating: FIRST(severity_ratings) != null ? FIRST(severity_ratings) : "UNKNOWN",
-    package: package,
-    affected_version: affected_version,
-    full_purl: FIRST(full_purls),
-    fixed_in: FIRST(all_fixed_in),
-    affected_releases: LENGTH(releaseList),
-    affected_endpoints: endpointCount,
-    affected_data: FIRST(all_affected_data)
-  }
-```
-
-**Key Optimizations:**
-
-- **COLLECT/AGGREGATE pattern**: Groups vulnerabilities by CVE + package + version
-- **SORT/LIMIT outside loops**: Ensures proper ordering and pagination
-- **Deduplication**: Removes duplicate entries from multiple paths
-- **Version validation in Go**: Final filtering done post-query for accuracy using `util.IsVersionAffected()`
 
 **Response:**
 
@@ -1750,28 +929,6 @@ query GetAffectedReleases($severity: Severity!, $limit: Int) {
 }
 ```
 
-**Response:**
-
-```json
-{
-  "data": {
-    "affectedReleases": [
-      {
-        "cve_id": "CVE-2024-1234",
-        "severity_score": 9.8,
-        "severity_rating": "CRITICAL",
-        "package": "pkg:npm/lodash",
-        "affected_version": "4.17.20",
-        "release_name": "api-service",
-        "release_version": "2.1.0",
-        "content_sha": "abc123def456",
-        "project_type": "application"
-      }
-    ]
-  }
-}
-```
-
 **Query Endpoints by Severity:**
 
 ```graphql
@@ -1786,158 +943,6 @@ query GetSyncedEndpoints($limit: Int) {
     }
   }
 }
-```
-
-**Response:**
-
-```json
-{
-  "data": {
-    "syncedEndpoints": [
-      {
-        "endpoint_name": "prod-us-east-1",
-        "total_vulnerabilities": {
-          "critical": 2,
-          "high": 8,
-          "medium": 15,
-          "low": 23
-        }
-      }
-    ]
-  }
-}
-```
-
-## Integration Workflows
-
-### CI/CD Pipeline Integration
-
-```yaml
-# GitHub Actions example
-name: Build and Track Release
-on:
-  push:
-    branches: [main]
-
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v2
-      
-      - name: Generate SBOM
-        run: |
-          syft . -o cyclonedx-json > sbom.json
-      
-      - name: Upload to CVE Tracker
-        run: |
-          ./cve2release-cli upload \
-            --sbom sbom.json \
-            --type application \
-            --server ${{ secrets.CVE_TRACKER_URL }}
-      
-      - name: Deploy to Production
-        run: |
-          kubectl apply -f deployment.yaml
-      
-      - name: Record Sync
-        run: |
-          curl -X POST ${{ secrets.CVE_TRACKER_URL }}/api/v1/sync \
-            -H "Content-Type: application/json" \
-            -d '{
-              "release_name": "${{ github.event.repository.name }}",
-              "release_version": "${{ github.sha }}",
-              "endpoint_name": "production-k8s"
-            }'
-      
-      - name: Check for Critical Vulnerabilities
-        run: |
-          CRITICAL_VULNS=$(curl -s ${{ secrets.CVE_TRACKER_URL }}/api/v1/graphql \
-            -H "Content-Type: application/json" \
-            -d '{"query": "query { release(name: \"'${{ github.event.repository.name }}'\", version: \"'${{ github.sha }}'\") { vulnerabilities { severity_rating } } }"}' | \
-            jq '[.data.release.vulnerabilities[] | select(.severity_rating == "CRITICAL")] | length')
-          if [ $CRITICAL_VULNS -gt 0 ]; then
-            echo "ERROR: Found $CRITICAL_VULNS critical vulnerabilities"
-            exit 1
-          fi
-```
-
-### GitOps Integration
-
-```yaml
-# ArgoCD sync hook
-apiVersion: v1
-kind: ConfigMap
-metadata:
-  name: cve-tracker-sync-hook
-data:
-  sync.sh: |
-    #!/bin/bash
-    RELEASE_NAME=$(yq e '.metadata.name' deployment.yaml)
-    RELEASE_VERSION=$(yq e '.spec.template.spec.containers[0].image' deployment.yaml | cut -d: -f2)
-    
-    curl -X POST ${CVE_TRACKER_URL}/api/v1/sync \
-      -H "Content-Type: application/json" \
-      -d "{
-        \"release_name\": \"${RELEASE_NAME}\",
-        \"release_version\": \"${RELEASE_VERSION}\",
-        \"endpoint_name\": \"${ARGOCD_APP_NAME}\"
-      }"
-    
-    # Check for high severity vulnerabilities
-    HIGH_VULNS=$(curl -s ${CVE_TRACKER_URL}/api/v1/graphql \
-      -H "Content-Type: application/json" \
-      -d '{"query": "query { syncedEndpoints(limit: 1000) { endpoint_name total_vulnerabilities { high } } }"}' | \
-      jq ".data.syncedEndpoints[] | select(.endpoint_name == \"${ARGOCD_APP_NAME}\") | .total_vulnerabilities.high")
-    
-    if [ $HIGH_VULNS -gt 0 ]; then
-      echo "WARNING: $HIGH_VULNS high severity vulnerabilities detected"
-    fi
-```
-
-## Monitoring and Alerting
-
-### Recommended Metrics
-
-- Number of critical/high vulnerabilities per environment
-- Number of affected endpoints by endpoint type
-- Time from CVE publication to detection in system
-- Number of syncs per day/week
-- Unique endpoints with vulnerabilities
-- CVSS calculation success/failure rate
-- Query response times by severity level
-- API endpoint response times (target: <3s)
-
-### Sample Alert Rules
-
-```yaml
-# Prometheus alert example
-groups:
-  - name: vulnerability_alerts
-    rules:
-      - alert: CriticalVulnerabilityInProduction
-        expr: cve_tracker_critical_vulns{environment="production"} > 0
-        for: 5m
-        annotations:
-          summary: "Critical vulnerabilities detected in production"
-          severity_rating: "CRITICAL"
-          
-      - alert: HighSeverityMissionAssetVulnerable
-        expr: cve_tracker_high_vulns{endpoint_type="mission_asset"} > 0
-        for: 1m
-        annotations:
-          summary: "Mission asset affected by high severity vulnerability"
-          severity_rating: "HIGH"
-      
-      - alert: CVSSCalculationFailures
-        expr: rate(cve_tracker_cvss_parse_errors[5m]) > 0.1
-        annotations:
-          summary: "High rate of CVSS parsing failures"
-      
-      - alert: SlowAPIResponseTime
-        expr: histogram_quantile(0.95, rate(http_request_duration_seconds_bucket[5m])) > 3
-        annotations:
-          summary: "API response time exceeding 3 second SLA"
 ```
 
 ## Deployment Considerations
@@ -2083,7 +1088,14 @@ REQUEST_TIMEOUT=3s
 
 ## Conclusion
 
-This Post-Deployment Vulnerability Remediation system provides comprehensive visibility into software vulnerabilities across the entire deployment lifecycle. By connecting CVE data with releases, SBOMs, and actual deployment endpoints, security teams can quickly answer the critical questions: "Where is this vulnerability running?" and "How do I fix it?"
+This Post-Deployment Vulnerability Remediation system provides comprehensive visibility into software vulnerabilities across the entire deployment lifecycle, organized around four key domains that answer critical security questions.
+
+The system connects CVE data with releases, SBOMs, and actual deployment endpoints, enabling security teams to:
+
+1. **Understand The Threat** - View all vulnerabilities with accurate CVSS scoring and severity classification
+2. **Identify Where to Fix** - Trace vulnerable packages to source code repositories and specific releases
+3. **Locate Where It's Running** - See exactly which production systems and environments are affected
+4. **Execute Remediation** - Take action through integrated workflows (Jira, GitHub, GitLab, AI auto-remediation)
 
 The hub-and-spoke architecture ensures scalability and performance, while the sync tracking mechanism provides the crucial link between code and production systems. The addition of pre-calculated CVSS scores and severity ratings enables efficient, real-time severity-based filtering and prioritization, with all API operations completing within 3 seconds to ensure optimal end-user experience. The
 rolling update deployment strategy ensures continuous availability, eliminating the need for maintenance windows while maintaining service quality.
@@ -2093,6 +1105,11 @@ rolling update deployment strategy ensures continuous availability, eliminating 
 ```mermaid
 mindmap
   root((Post-Deployment<br/>Vulnerability<br/>Remediation))
+    Four Domains
+      Vulnerabilities (Threat)
+      Project Releases (Fix Location)
+      Synced Endpoints (Running Location)
+      Mitigations (Fix Actions)
     Performance
       All API responses <3s
       Indexed severity ratings
@@ -2111,16 +1128,19 @@ mindmap
       Rolling updates
       99.9% uptime
       Zero downtime deployments
-    Reliability
-      All CVEs have severity
-      Even missing data handled
-      Comprehensive tracking
+    Actionability
+      Jira integration
+      GitHub Issues
+      GitLab Issues
+      AI Auto-remediation
 ```
 
+- **Four-Domain Model**: Comprehensive view from threat identification to remediation execution
 - **Performance**: All API responses <3 seconds for optimal user experience
 - **Accuracy**: Uses official CVSS specification via validated library
 - **Completeness**: All CVEs have severity ratings, even those with missing data
 - **Scalability**: Indexed severity ratings support millions of CVEs efficiently
 - **Availability**: Rolling updates ensure zero-downtime deployments
 - **Reliability**: 99.9% uptime with no maintenance windows required
+- **Actionability**: Integrated workflows for Jira, GitHub, GitLab, and AI auto-remediation
 - **Query Optimization**: COLLECT/AGGREGATE/SORT patterns ensure efficient data processing

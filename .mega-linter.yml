@@ -33,3 +33,4 @@ PRE_COMMANDS:
   - command: rm -rf /usr/lib/go
   - command: tar -xf go1.25.4.linux-amd64.tar.gz -C /usr/lib
   - command: go version
+  - command: golangci-lint cache clean
