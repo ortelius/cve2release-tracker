@@ -12,6 +12,7 @@ require (
 	github.com/glebarez/go-sqlite v1.22.0
 	github.com/gofiber/fiber/v2 v2.52.10
 	github.com/google/osv-scanner v1.9.2
+	github.com/google/osv-scanner/v2 v2.3.0
 	github.com/graphql-go/graphql v0.8.1
 	github.com/package-url/packageurl-go v0.1.3
 	github.com/spf13/cobra v1.10.1
