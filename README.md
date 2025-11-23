@@ -71,7 +71,7 @@ git clone https://github.com/ortelius/pdvd-frontend
 
 3. Clone backend application 
 ```bash
-https://github.com/ortelius/pdvd-backend
+git clone https://github.com/ortelius/pdvd-backend
 ```
 
 4. Run docker-compose
