@@ -94,7 +94,7 @@ func InitializeDatabase() DBConnection {
 	dbhost := GetEnvDefault("ARANGO_HOST", "localhost")
 	dbport := GetEnvDefault("ARANGO_PORT", "8529")
 	dbuser := GetEnvDefault("ARANGO_USER", "root")
-	dbpass := GetEnvDefault("ARANGO_PASS", "")
+	dbpass := GetEnvDefault("ARANGO_PASS", "mypassword")
 	dburl := GetEnvDefault("ARANGO_URL", "http://"+dbhost+":"+dbport)
 
 	var client arangodb.Client
