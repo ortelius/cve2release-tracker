@@ -31,7 +31,7 @@ spec:
         kubernetes.io/os: linux
       containers:
         - name: {{ include "microservice.name" . }}
-          image: "quay.io/ortelius/pdvd-backend:main-v10.0.92-g2eebd3"
+          image: "{{ .Values.image.repository }}:{{ .Values.image.tag }}"
           imagePullPolicy: Always
           env:
             - name: ARANGO_USER
