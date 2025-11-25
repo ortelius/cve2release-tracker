@@ -5,6 +5,7 @@
 package util
 
 import (
+	"log"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -265,6 +266,8 @@ func IsVersionAffected(version string, affected models.Affected) bool {
 
 // isVersionInRange checks if a version falls within an OSV range
 // Uses ecosystem-specific parsers for npm and PyPI
+// FIXED: Requires both lower and upper boundaries to avoid false positives
+// FIXED: Special handling for OSV's "0" value meaning "from the beginning"
 func isVersionInRange(version string, vrange models.Range, ecosystem string) bool {
 	// Try ecosystem-specific parsers first
 	switch strings.ToLower(ecosystem) {
@@ -283,38 +286,73 @@ func isVersionInRange(version string, vrange models.Range, ecosystem string) boo
 
 	var introduced, fixed, lastAffected *semver.Version
 
+	// Parse all events and collect boundaries
 	for _, event := range vrange.Events {
 		if event.Introduced != "" {
-			introduced, _ = semver.NewVersion(event.Introduced)
+			// FIXED: Special handling for OSV's "0" value
+			if event.Introduced == "0" {
+				// "0" means "from the beginning of time" in OSV spec
+				introduced = semver.MustParse("0.0.0")
+			} else {
+				if parsed, err := semver.NewVersion(event.Introduced); err == nil {
+					introduced = parsed
+				} else {
+					log.Printf("WARNING: Failed to parse introduced version '%s': %v", event.Introduced, err)
+				}
+			}
 		}
 		if event.Fixed != "" {
-			fixed, _ = semver.NewVersion(event.Fixed)
+			if parsed, err := semver.NewVersion(event.Fixed); err == nil {
+				fixed = parsed
+			} else {
+				log.Printf("WARNING: Failed to parse fixed version '%s': %v", event.Fixed, err)
+			}
 		}
 		if event.LastAffected != "" {
-			lastAffected, _ = semver.NewVersion(event.LastAffected)
+			if parsed, err := semver.NewVersion(event.LastAffected); err == nil {
+				lastAffected = parsed
+			} else {
+				log.Printf("WARNING: Failed to parse last_affected version '%s': %v", event.LastAffected, err)
+			}
 		}
+	}
+
+	// FIXED: Require both lower and upper boundaries to prevent false positives
+	// A valid vulnerability range must have both:
+	// - A lower bound (introduced)
+	// - AND an upper bound (fixed OR last_affected)
+	hasLowerBound := introduced != nil
+	hasUpperBound := fixed != nil || lastAffected != nil
+
+	if !hasLowerBound || !hasUpperBound {
+		// Incomplete range data - cannot reliably determine if version is affected
+		// Return false to avoid false positives
+		log.Printf("WARNING: Incomplete range data for version %s (hasLowerBound=%v, hasUpperBound=%v)",
+			version, hasLowerBound, hasUpperBound)
+		return false
 	}
 
 	// Check if version is >= introduced
 	if introduced != nil && v.LessThan(introduced) {
-		return false
+		return false // Version is before the introduced version
 	}
 
 	// Check if version is < fixed
 	if fixed != nil && !v.LessThan(fixed) {
-		return false
+		return false // Version is at or after the fixed version
 	}
 
 	// Check if version is <= last_affected
 	if lastAffected != nil && v.GreaterThan(lastAffected) {
-		return false
+		return false // Version is after the last affected version
 	}
 
-	// If we get here and there's an introduced/fixed/last_affected, it's affected
-	return introduced != nil || fixed != nil || lastAffected != nil
+	// If we reach here, version is within the affected range
+	return true
 }
 
 // isVersionInRangeNPM uses npm-specific version comparison
+// FIXED: Added same boundary requirements and "0" handling
 func isVersionInRangeNPM(version string, vrange models.Range) bool {
 	v, err := npm.NewVersion(version)
 	if err != nil {
@@ -330,23 +368,47 @@ func isVersionInRangeNPM(version string, vrange models.Range) bool {
 
 	for _, event := range vrange.Events {
 		if event.Introduced != "" {
-			if intro, err := npm.NewVersion(event.Introduced); err == nil {
-				introduced = intro
-				hasIntroduced = true
+			// FIXED: Special handling for "0"
+			if event.Introduced == "0" {
+				if intro, err := npm.NewVersion("0.0.0"); err == nil {
+					introduced = intro
+					hasIntroduced = true
+				}
+			} else {
+				if intro, err := npm.NewVersion(event.Introduced); err == nil {
+					introduced = intro
+					hasIntroduced = true
+				} else {
+					log.Printf("WARNING: Failed to parse npm introduced version '%s': %v", event.Introduced, err)
+				}
 			}
 		}
 		if event.Fixed != "" {
 			if fix, err := npm.NewVersion(event.Fixed); err == nil {
 				fixed = fix
 				hasFixed = true
+			} else {
+				log.Printf("WARNING: Failed to parse npm fixed version '%s': %v", event.Fixed, err)
 			}
 		}
 		if event.LastAffected != "" {
 			if last, err := npm.NewVersion(event.LastAffected); err == nil {
 				lastAffected = last
 				hasLastAffected = true
+			} else {
+				log.Printf("WARNING: Failed to parse npm last_affected version '%s': %v", event.LastAffected, err)
 			}
 		}
+	}
+
+	// FIXED: Require both boundaries
+	hasLowerBound := hasIntroduced
+	hasUpperBound := hasFixed || hasLastAffected
+
+	if !hasLowerBound || !hasUpperBound {
+		log.Printf("WARNING: Incomplete npm range data for version %s (hasLowerBound=%v, hasUpperBound=%v)",
+			version, hasLowerBound, hasUpperBound)
+		return false
 	}
 
 	// Check if version is >= introduced
@@ -364,11 +426,12 @@ func isVersionInRangeNPM(version string, vrange models.Range) bool {
 		return false
 	}
 
-	// If we get here and there's an introduced/fixed/last_affected, it's affected
-	return hasIntroduced || hasFixed || hasLastAffected
+	// If we get here, version is within the affected range
+	return true
 }
 
 // isVersionInRangePython uses PEP 440 version comparison for Python packages
+// FIXED: Added same boundary requirements and "0" handling
 func isVersionInRangePython(version string, vrange models.Range) bool {
 	v, err := pep440.Parse(version)
 	if err != nil {
@@ -384,23 +447,47 @@ func isVersionInRangePython(version string, vrange models.Range) bool {
 
 	for _, event := range vrange.Events {
 		if event.Introduced != "" {
-			if intro, err := pep440.Parse(event.Introduced); err == nil {
-				introduced = intro
-				hasIntroduced = true
+			// FIXED: Special handling for "0"
+			if event.Introduced == "0" {
+				if intro, err := pep440.Parse("0.0.0"); err == nil {
+					introduced = intro
+					hasIntroduced = true
+				}
+			} else {
+				if intro, err := pep440.Parse(event.Introduced); err == nil {
+					introduced = intro
+					hasIntroduced = true
+				} else {
+					log.Printf("WARNING: Failed to parse python introduced version '%s': %v", event.Introduced, err)
+				}
 			}
 		}
 		if event.Fixed != "" {
 			if fix, err := pep440.Parse(event.Fixed); err == nil {
 				fixed = fix
 				hasFixed = true
+			} else {
+				log.Printf("WARNING: Failed to parse python fixed version '%s': %v", event.Fixed, err)
 			}
 		}
 		if event.LastAffected != "" {
 			if last, err := pep440.Parse(event.LastAffected); err == nil {
 				lastAffected = last
 				hasLastAffected = true
+			} else {
+				log.Printf("WARNING: Failed to parse python last_affected version '%s': %v", event.LastAffected, err)
 			}
 		}
+	}
+
+	// FIXED: Require both boundaries
+	hasLowerBound := hasIntroduced
+	hasUpperBound := hasFixed || hasLastAffected
+
+	if !hasLowerBound || !hasUpperBound {
+		log.Printf("WARNING: Incomplete python range data for version %s (hasLowerBound=%v, hasUpperBound=%v)",
+			version, hasLowerBound, hasUpperBound)
+		return false
 	}
 
 	// Check if version is >= introduced
@@ -418,15 +505,47 @@ func isVersionInRangePython(version string, vrange models.Range) bool {
 		return false
 	}
 
-	// If we get here and there's an introduced/fixed/last_affected, it's affected
-	return hasIntroduced || hasFixed || hasLastAffected
+	// If we get here, version is within the affected range
+	return true
 }
 
 // isVersionInRangeString performs string-based comparison as fallback
+// FIXED: Added boundary requirement check
 func isVersionInRangeString(version string, vrange models.Range) bool {
+	hasIntroduced := false
+	hasFixed := false
+	hasLastAffected := false
+
+	for _, event := range vrange.Events {
+		if event.Introduced != "" {
+			hasIntroduced = true
+		}
+		if event.Fixed != "" {
+			hasFixed = true
+		}
+		if event.LastAffected != "" {
+			hasLastAffected = true
+		}
+	}
+
+	// FIXED: Require both boundaries even for string comparison
+	hasLowerBound := hasIntroduced
+	hasUpperBound := hasFixed || hasLastAffected
+
+	if !hasLowerBound || !hasUpperBound {
+		log.Printf("WARNING: Incomplete range data for string version %s (hasLowerBound=%v, hasUpperBound=%v)",
+			version, hasLowerBound, hasUpperBound)
+		return false
+	}
+
 	for _, event := range vrange.Events {
 		// Simple string comparison for non-semver versions
 		if event.Introduced != "" {
+			// FIXED: Special handling for "0"
+			if event.Introduced == "0" {
+				// "0" means from the beginning, so no lower bound check needed
+				continue
+			}
 			if version < event.Introduced {
 				return false
 			}
