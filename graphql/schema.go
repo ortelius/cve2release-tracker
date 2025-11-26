@@ -10,9 +10,9 @@ import (
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/google/osv-scanner/pkg/models"
 	"github.com/graphql-go/graphql"
-	"github.com/ortelius/cve2release-tracker/database"
-	"github.com/ortelius/cve2release-tracker/model"
-	"github.com/ortelius/cve2release-tracker/util"
+	"github.com/ortelius/pdvd-backend/v12/database"
+	"github.com/ortelius/pdvd-backend/v12/model"
+	"github.com/ortelius/pdvd-backend/v12/util"
 )
 
 var db database.DBConnection

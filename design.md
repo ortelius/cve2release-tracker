@@ -675,7 +675,7 @@ Sync records track when a specific release version is deployed to an endpoint:
 
 ```bash
 # Scheduled job runs periodically
-./cve2release-tracker
+./pdvd-backend/v12
 ```
 
 **Steps:**
@@ -1038,7 +1038,7 @@ spec:
    ```bash
    # Clear existing CVEs
    # Run CVE loader with CVSS calculation
-   ./cve2release-tracker
+   ./pdvd-backend/v12
    ```
 
 2. **Migration Script** (For large datasets)

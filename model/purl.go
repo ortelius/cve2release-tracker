@@ -1,4 +1,4 @@
-// Package model defines the data structures used by the CVE2Release-Tracker,
+// Package model defines the data structures used by the pdvd-backend/v12,
 // including releases, SBOMs, and endpoints.
 package model
 

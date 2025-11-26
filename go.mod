@@ -1,4 +1,4 @@
-module github.com/ortelius/cve2release-tracker
+module github.com/ortelius/pdvd-backend/v12
 
 go 1.25.4
 

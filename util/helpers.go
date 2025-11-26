@@ -333,7 +333,7 @@ func isVersionInRange(version string, vrange models.Range, ecosystem string) boo
 	}
 
 	// Check if version is >= introduced
-	if introduced != nil && v.LessThan(introduced) {
+	if v.LessThan(introduced) {
 		return false // Version is before the introduced version
 	}
 

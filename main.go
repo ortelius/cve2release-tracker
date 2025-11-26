@@ -1,4 +1,4 @@
-// package main provides the entry point and API handlers for the CVE2Release-Tracker microservice,
+// package main provides the entry point and API handlers for the pdvd-backend/v12 microservice,
 // including logic for processing releases, SBOMs, handling sync operations, and serving the GraphQL API.
 package main
 
@@ -19,10 +19,10 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/logger"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/graphql-go/graphql"
-	"github.com/ortelius/cve2release-tracker/database"
-	gqlschema "github.com/ortelius/cve2release-tracker/graphql"
-	"github.com/ortelius/cve2release-tracker/model"
-	"github.com/ortelius/cve2release-tracker/util"
+	"github.com/ortelius/pdvd-backend/v12/database"
+	gqlschema "github.com/ortelius/pdvd-backend/v12/graphql"
+	"github.com/ortelius/pdvd-backend/v12/model"
+	"github.com/ortelius/pdvd-backend/v12/util"
 )
 
 var db database.DBConnection
@@ -773,7 +773,7 @@ func main() {
 
 	// Create Fiber app
 	app := fiber.New(fiber.Config{
-		AppName:     "CVE2Release-Tracker API v1.0",
+		AppName:     "pdvd-backend/v12 API v1.0",
 		BodyLimit:   50 * 1024 * 1024, // 50MB limit for SBOM uploads
 		ReadTimeout: time.Second * 60, // 60 second read timeout for large uploads
 	})
