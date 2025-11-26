@@ -1019,11 +1019,11 @@ spec:
       - name: api
         livenessProbe:
           httpGet:
-            path: /health
+            path: /
             port: 8080
         readinessProbe:
           httpGet:
-            path: /ready
+            path: /
             port: 8080
 ```
 

@@ -784,7 +784,7 @@ func main() {
 	app.Use(cors.New())
 
 	// Health check endpoint
-	app.Get("/health", func(c *fiber.Ctx) error {
+	app.Get("/", func(c *fiber.Ctx) error {
 		return c.JSON(fiber.Map{
 			"status": "healthy",
 		})
