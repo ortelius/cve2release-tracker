@@ -4,11 +4,9 @@ package graphql
 
 import (
 	"context"
-	"fmt"
 	"strings"
 	"time"
 
-	"github.com/arangodb/go-driver"
 	"github.com/arangodb/go-driver/v2/arangodb"
 	"github.com/google/osv-scanner/pkg/models"
 	"github.com/graphql-go/graphql"
@@ -620,11 +618,12 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 	return vulnerabilities, nil
 }
 
-func (r *queryResolver) resolveAffectedReleases(ctx context.Context, severityScore float64) ([]*model.AffectedRelease, error) {
-	var query string
+func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) {
+	ctx := context.Background()
+	severityScore := util.GetSeverityScore(severity)
 
+	var query string
 	if severityScore == 0.0 {
-		// Query without severity score filtering
 		query = `
 			LET results = (
 				FOR release IN release
@@ -699,7 +698,6 @@ func (r *queryResolver) resolveAffectedReleases(ctx context.Context, severitySco
 				RETURN result
 		`
 	} else {
-		// Query with severity score filtering
 		query = `
 			LET results = (
 				FOR release IN release
@@ -776,31 +774,94 @@ func (r *queryResolver) resolveAffectedReleases(ctx context.Context, severitySco
 		`
 	}
 
-	bindVars := map[string]interface{}{}
-	if severityScore != 0.0 {
-		bindVars["severityScore"] = severityScore
+	var cursor arangodb.Cursor
+	var err error
+	if severityScore == 0.0 {
+		cursor, err = db.Database.Query(ctx, query, nil)
+	} else {
+		cursor, err = db.Database.Query(ctx, query, &arangodb.QueryOptions{
+			BindVars: map[string]interface{}{
+				"severityScore": severityScore,
+			},
+		})
 	}
-
-	cursor, err := r.DB.Query(ctx, query, bindVars)
 	if err != nil {
-		return nil, fmt.Errorf("failed to execute affected releases query: %w", err)
+		return nil, err
 	}
 	defer cursor.Close()
 
-	var results []*model.AffectedRelease
-	for {
-		var result model.AffectedRelease
-		_, err := cursor.ReadDocument(ctx, &result)
-		if driver.IsNoMoreDocuments(err) {
-			break
-		}
-		if err != nil {
-			return nil, fmt.Errorf("failed to read affected release document: %w", err)
-		}
-		results = append(results, &result)
+	type Candidate struct {
+		CveID                 *string          `json:"cve_id"`
+		CveSummary            *string          `json:"cve_summary"`
+		CveDetails            *string          `json:"cve_details"`
+		CveSeverityScore      *float64         `json:"cve_severity_score"`
+		CveSeverityRating     *string          `json:"cve_severity_rating"`
+		CvePublished          *string          `json:"cve_published"`
+		CveModified           *string          `json:"cve_modified"`
+		CveAliases            []string         `json:"cve_aliases"`
+		AffectedData          *models.Affected `json:"affected_data"`
+		Package               string           `json:"package"`
+		Version               string           `json:"version"`
+		FullPurl              string           `json:"full_purl"`
+		ReleaseName           string           `json:"release_name"`
+		ReleaseVersion        string           `json:"release_version"`
+		ContentSha            string           `json:"content_sha"`
+		ProjectType           string           `json:"project_type"`
+		OpenssfScorecardScore *float64         `json:"openssf_scorecard_score"`
+		SyncedEndpointCount   int              `json:"synced_endpoint_count"`
+		DependencyCount       int              `json:"dependency_count"`
 	}
 
-	return results, nil
+	var affectedReleases []map[string]interface{}
+	seen := make(map[string]bool)
+
+	for cursor.HasMore() {
+		var candidate Candidate
+		_, err := cursor.ReadDocument(ctx, &candidate)
+		if err != nil {
+			continue
+		}
+		if candidate.AffectedData != nil && !util.IsVersionAffected(candidate.Version, *candidate.AffectedData) {
+			continue
+		}
+		cveID := ""
+		if candidate.CveID != nil {
+			cveID = *candidate.CveID
+		}
+		key := candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version + ":" + cveID
+		if seen[key] {
+			continue
+		}
+		seen[key] = true
+
+		var fixedVersions []string
+		if candidate.AffectedData != nil {
+			fixedVersions = extractFixedVersions(*candidate.AffectedData)
+		}
+
+		affectedReleases = append(affectedReleases, map[string]interface{}{
+			"cve_id":                  candidate.CveID,
+			"summary":                 candidate.CveSummary,
+			"details":                 candidate.CveDetails,
+			"severity_score":          candidate.CveSeverityScore,
+			"severity_rating":         candidate.CveSeverityRating,
+			"published":               candidate.CvePublished,
+			"modified":                candidate.CveModified,
+			"aliases":                 candidate.CveAliases,
+			"package":                 candidate.Package,
+			"affected_version":        candidate.Version,
+			"full_purl":               candidate.FullPurl,
+			"fixed_in":                fixedVersions,
+			"release_name":            candidate.ReleaseName,
+			"release_version":         candidate.ReleaseVersion,
+			"content_sha":             candidate.ContentSha,
+			"project_type":            candidate.ProjectType,
+			"openssf_scorecard_score": candidate.OpenssfScorecardScore,
+			"synced_endpoint_count":   candidate.SyncedEndpointCount,
+			"dependency_count":        candidate.DependencyCount,
+		})
+	}
+	return affectedReleases, nil
 }
 
 func resolveSyncedEndpoints(limit int) ([]map[string]interface{}, error) {
