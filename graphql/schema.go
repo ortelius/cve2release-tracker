@@ -647,40 +647,105 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 							LET purl = DOCUMENT(sbomEdge._to)
 							FILTER purl != null
 							
-							LET cveMatches = (
-								FOR cveEdge IN cve2purl
-									FILTER cveEdge._to == purl._id
-									LET cve = DOCUMENT(cveEdge._from)
-									FILTER cve != null AND cve.affected != null
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								
+								// OPTIMIZATION: Use denormalized fields for fast filtering
+								FILTER purl.purl IN cve.affected_package_purls
+								
+								// Pad the SBOM version for comparison
+								LET sbomVersionPadded = (
+									LET cleanVersion = REGEX_REPLACE(sbomEdge.version, "^v", "")
+									LET parts = SPLIT(cleanVersion, ".")
+									LET part0 = LENGTH(parts) > 0 ? SUBSTRING(CONCAT("0000", SPLIT(parts[0], "-")[0]), -4) : "0000"
+									LET part1 = LENGTH(parts) > 1 ? SUBSTRING(CONCAT("0000", SPLIT(parts[1], "-")[0]), -4) : "0000"
+									LET part2 = LENGTH(parts) > 2 ? SUBSTRING(CONCAT("0000", SPLIT(parts[2], "-")[0]), -4) : "0000"
+									LET suffix = REGEX_REPLACE(cleanVersion, "^\\d+(\\.\\d+)?(\\.\\d+)?", "")
+									RETURN CONCAT(part0, ".", part1, ".", part2, suffix)
+								)
+								
+								// Get version info from denormalized map
+								LET versionInfo = cve.affected_versions_map[purl.purl]
+								
+								// Check if version matches exactly (original version)
+								LET exactMatch = (
+									versionInfo != null AND
+									versionInfo.exact_versions != null AND
+									sbomEdge.version IN versionInfo.exact_versions
+								)
+								
+								// Check if version matches exactly (padded version)
+								LET exactMatchPadded = (
+									versionInfo != null AND
+									versionInfo.exact_versions_padded != null AND
+									sbomVersionPadded IN versionInfo.exact_versions_padded
+								)
+								
+								// Check if version is in a padded range using lexicographic comparison
+								LET paddedRangeMatch = (
+									versionInfo != null AND
+									versionInfo.ranges != null AND
+									sbomVersionPadded != "" AND
+									LENGTH(
+										FOR range IN versionInfo.ranges
+											// Only check if padded versions exist
+											FILTER range.introduced_padded != null
+											FILTER range.fixed_padded != null OR range.last_affected_padded != null
+											
+											// Lexicographic comparison
+											LET meetsIntroduced = sbomVersionPadded >= range.introduced_padded
+											LET meetsFixed = (
+												range.fixed_padded == null OR 
+												sbomVersionPadded < range.fixed_padded
+											)
+											LET meetsLastAffected = (
+												range.last_affected_padded == null OR 
+												sbomVersionPadded <= range.last_affected_padded
+											)
+											
+											FILTER meetsIntroduced AND meetsFixed AND meetsLastAffected
+											RETURN true
+									) > 0
+								)
+								
+								// Has complex ranges that need Go processing (no padded versions)
+								LET hasComplexRanges = (
+									versionInfo != null AND
+									versionInfo.ranges != null AND
+									LENGTH(
+										FOR range IN versionInfo.ranges
+											// Complex if missing padded versions
+											FILTER range.introduced_padded == null OR 
+												   (range.fixed_padded == null AND range.last_affected_padded == null)
+											RETURN true
+									) > 0
+								)
+								
+								// Return if: exact match OR padded range match OR needs complex checking
+								FILTER exactMatch OR exactMatchPadded OR paddedRangeMatch OR hasComplexRanges
+								
+								// Get the original affected data for the matching PURL
+								LET matchingAffected = FIRST(
 									FOR affected IN cve.affected
-										LET cveBasePurl = affected.package.purl != null ? 
+										LET affectedPurl = affected.package.purl != null ? 
 											affected.package.purl : 
 											CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-										FILTER cveBasePurl == purl.purl
-										RETURN {
-											cve_id: cve.id,
-											cve_summary: cve.summary,
-											cve_details: cve.details,
-											cve_severity_score: cve.database_specific.cvss_base_score,
-											cve_severity_rating: cve.database_specific.severity_rating,
-											cve_published: cve.published,
-											cve_modified: cve.modified,
-											cve_aliases: cve.aliases,
-											affected_data: affected
-										}
-							)
-							
-							FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
+										FILTER affectedPurl == purl.purl
+										RETURN affected
+								)
+								
 								RETURN {
-									cve_id: cveMatch != null ? cveMatch.cve_id : null,
-									cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
-									cve_details: cveMatch != null ? cveMatch.cve_details : null,
-									cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
-									cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
-									cve_published: cveMatch != null ? cveMatch.cve_published : null,
-									cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
-									cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
-									affected_data: cveMatch != null ? cveMatch.affected_data : null,
+									cve_id: cve.id,
+									cve_summary: cve.summary,
+									cve_details: cve.details,
+									cve_severity_score: cve.database_specific.cvss_base_score,
+									cve_severity_rating: cve.database_specific.severity_rating,
+									cve_published: cve.published,
+									cve_modified: cve.modified,
+									cve_aliases: cve.aliases,
+									affected_data: matchingAffected,
 									package: purl.purl,
 									version: sbomEdge.version,
 									full_purl: sbomEdge.full_purl,
@@ -690,7 +755,10 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									project_type: release.projecttype,
 									openssf_scorecard_score: release.openssf_scorecard_score,
 									synced_endpoint_count: syncCount,
-									dependency_count: depCount
+									dependency_count: depCount,
+									exact_match: exactMatch OR exactMatchPadded,
+									padded_range_match: paddedRangeMatch,
+									has_complex_ranges: hasComplexRanges
 								}
 			)
 			FOR result IN results
@@ -721,41 +789,106 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 							LET purl = DOCUMENT(sbomEdge._to)
 							FILTER purl != null
 							
-							LET cveMatches = (
-								FOR cveEdge IN cve2purl
-									FILTER cveEdge._to == purl._id
-									LET cve = DOCUMENT(cveEdge._from)
-									FILTER cve != null AND cve.affected != null
-									FILTER cve.database_specific.cvss_base_score >= @severityScore
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								FILTER cve.database_specific.cvss_base_score >= @severityScore
+								
+								// OPTIMIZATION: Use denormalized fields for fast filtering
+								FILTER purl.purl IN cve.affected_package_purls
+								
+								// Pad the SBOM version for comparison
+								LET sbomVersionPadded = (
+									LET cleanVersion = REGEX_REPLACE(sbomEdge.version, "^v", "")
+									LET parts = SPLIT(cleanVersion, ".")
+									LET part0 = LENGTH(parts) > 0 ? SUBSTRING(CONCAT("0000", SPLIT(parts[0], "-")[0]), -4) : "0000"
+									LET part1 = LENGTH(parts) > 1 ? SUBSTRING(CONCAT("0000", SPLIT(parts[1], "-")[0]), -4) : "0000"
+									LET part2 = LENGTH(parts) > 2 ? SUBSTRING(CONCAT("0000", SPLIT(parts[2], "-")[0]), -4) : "0000"
+									LET suffix = REGEX_REPLACE(cleanVersion, "^\\d+(\\.\\d+)?(\\.\\d+)?", "")
+									RETURN CONCAT(part0, ".", part1, ".", part2, suffix)
+								)
+								
+								// Get version info from denormalized map
+								LET versionInfo = cve.affected_versions_map[purl.purl]
+								
+								// Check if version matches exactly (original version)
+								LET exactMatch = (
+									versionInfo != null AND
+									versionInfo.exact_versions != null AND
+									sbomEdge.version IN versionInfo.exact_versions
+								)
+								
+								// Check if version matches exactly (padded version)
+								LET exactMatchPadded = (
+									versionInfo != null AND
+									versionInfo.exact_versions_padded != null AND
+									sbomVersionPadded IN versionInfo.exact_versions_padded
+								)
+								
+								// Check if version is in a padded range using lexicographic comparison
+								LET paddedRangeMatch = (
+									versionInfo != null AND
+									versionInfo.ranges != null AND
+									sbomVersionPadded != "" AND
+									LENGTH(
+										FOR range IN versionInfo.ranges
+											// Only check if padded versions exist
+											FILTER range.introduced_padded != null
+											FILTER range.fixed_padded != null OR range.last_affected_padded != null
+											
+											// Lexicographic comparison
+											LET meetsIntroduced = sbomVersionPadded >= range.introduced_padded
+											LET meetsFixed = (
+												range.fixed_padded == null OR 
+												sbomVersionPadded < range.fixed_padded
+											)
+											LET meetsLastAffected = (
+												range.last_affected_padded == null OR 
+												sbomVersionPadded <= range.last_affected_padded
+											)
+											
+											FILTER meetsIntroduced AND meetsFixed AND meetsLastAffected
+											RETURN true
+									) > 0
+								)
+								
+								// Has complex ranges that need Go processing (no padded versions)
+								LET hasComplexRanges = (
+									versionInfo != null AND
+									versionInfo.ranges != null AND
+									LENGTH(
+										FOR range IN versionInfo.ranges
+											// Complex if missing padded versions
+											FILTER range.introduced_padded == null OR 
+												   (range.fixed_padded == null AND range.last_affected_padded == null)
+											RETURN true
+									) > 0
+								)
+								
+								// Return if: exact match OR padded range match OR needs complex checking
+								FILTER exactMatch OR exactMatchPadded OR paddedRangeMatch OR hasComplexRanges
+								
+								// Get the original affected data for the matching PURL
+								LET matchingAffected = FIRST(
 									FOR affected IN cve.affected
-										LET cveBasePurl = affected.package.purl != null ? 
+										LET affectedPurl = affected.package.purl != null ? 
 											affected.package.purl : 
 											CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-										FILTER cveBasePurl == purl.purl
-										RETURN {
-											cve_id: cve.id,
-											cve_summary: cve.summary,
-											cve_details: cve.details,
-											cve_severity_score: cve.database_specific.cvss_base_score,
-											cve_severity_rating: cve.database_specific.severity_rating,
-											cve_published: cve.published,
-											cve_modified: cve.modified,
-											cve_aliases: cve.aliases,
-											affected_data: affected
-										}
-							)
-							
-							FOR cveMatch IN LENGTH(cveMatches) > 0 ? cveMatches : [null]
+										FILTER affectedPurl == purl.purl
+										RETURN affected
+								)
+								
 								RETURN {
-									cve_id: cveMatch != null ? cveMatch.cve_id : null,
-									cve_summary: cveMatch != null ? cveMatch.cve_summary : null,
-									cve_details: cveMatch != null ? cveMatch.cve_details : null,
-									cve_severity_score: cveMatch != null ? cveMatch.cve_severity_score : null,
-									cve_severity_rating: cveMatch != null ? cveMatch.cve_severity_rating : null,
-									cve_published: cveMatch != null ? cveMatch.cve_published : null,
-									cve_modified: cveMatch != null ? cveMatch.cve_modified : null,
-									cve_aliases: cveMatch != null ? cveMatch.cve_aliases : null,
-									affected_data: cveMatch != null ? cveMatch.affected_data : null,
+									cve_id: cve.id,
+									cve_summary: cve.summary,
+									cve_details: cve.details,
+									cve_severity_score: cve.database_specific.cvss_base_score,
+									cve_severity_rating: cve.database_specific.severity_rating,
+									cve_published: cve.published,
+									cve_modified: cve.modified,
+									cve_aliases: cve.aliases,
+									affected_data: matchingAffected,
 									package: purl.purl,
 									version: sbomEdge.version,
 									full_purl: sbomEdge.full_purl,
@@ -765,7 +898,10 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									project_type: release.projecttype,
 									openssf_scorecard_score: release.openssf_scorecard_score,
 									synced_endpoint_count: syncCount,
-									dependency_count: depCount
+									dependency_count: depCount,
+									exact_match: exactMatch OR exactMatchPadded,
+									padded_range_match: paddedRangeMatch,
+									has_complex_ranges: hasComplexRanges
 								}
 			)
 			FOR result IN results
@@ -810,6 +946,9 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 		OpenssfScorecardScore *float64         `json:"openssf_scorecard_score"`
 		SyncedEndpointCount   int              `json:"synced_endpoint_count"`
 		DependencyCount       int              `json:"dependency_count"`
+		ExactMatch            bool             `json:"exact_match"`
+		PaddedRangeMatch      bool             `json:"padded_range_match"`
+		HasComplexRanges      bool             `json:"has_complex_ranges"`
 	}
 
 	var affectedReleases []map[string]interface{}
@@ -821,9 +960,28 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 		if err != nil {
 			continue
 		}
-		if candidate.AffectedData != nil && !util.IsVersionAffected(candidate.Version, *candidate.AffectedData) {
-			continue
+
+		// OPTIMIZATION: Skip expensive version checking for exact and padded range matches
+		needsGoCheck := false
+		if candidate.ExactMatch || candidate.PaddedRangeMatch {
+			// Already verified in AQL - skip Go check
+			needsGoCheck = false
+		} else if candidate.HasComplexRanges {
+			// Has ranges that couldn't be padded - need Go check
+			needsGoCheck = true
+		} else {
+			// Shouldn't happen, but be safe
+			needsGoCheck = true
 		}
+
+		// Perform Go check if needed
+		if needsGoCheck {
+			if candidate.AffectedData != nil && !util.IsVersionAffected(candidate.Version, *candidate.AffectedData) {
+				// Go says NOT affected - skip this candidate
+				continue
+			}
+		}
+
 		cveID := ""
 		if candidate.CveID != nil {
 			cveID = *candidate.CveID
