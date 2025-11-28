@@ -85,7 +85,6 @@ var SBOMType = graphql.NewObject(graphql.ObjectConfig{
 })
 
 // --- Start of OpenSSF Scorecard Types ---
-
 // ScorecardDocumentationType defines documentation links for an OpenSSF Scorecard check.
 var ScorecardDocumentationType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardDocumentation",
