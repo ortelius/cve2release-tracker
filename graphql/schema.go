@@ -619,13 +619,13 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 }
 
 // OPTIMIZED: resolveAffectedReleases with pre-calculated metadata and proper index usage
+
 func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
 	severityScore := util.GetSeverityScore(severity)
 
 	var query string
 	if severityScore == 0.0 {
-		// OPTIMIZED: Pre-calculate per-release metadata, use indexed edge lookups
 		query = `
 			// Step 1: Pre-calculate release metadata ONCE per release
 			LET releaseMetadata = (
@@ -643,6 +643,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 					)
 					RETURN {
 						key: CONCAT(release.name, ":", release.version),
+						_id: release._id,
 						name: release.name,
 						version: release.version,
 						content_sha: release.contentsha,
@@ -653,60 +654,57 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 					}
 			)
 			
-			// Step 2: Create lookup map for O(1) access
-			LET releaseLookup = ZIP(releaseMetadata[*].key, releaseMetadata)
-			
-			// Step 3: Hub-spoke traversal using indexed edges
-			FOR release IN release
-				FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-					FOR purlEdge IN sbom2purl
-						FILTER purlEdge._from == sbomEdge._id
-						LET purl = DOCUMENT(purlEdge._to)
-						FILTER purl != null
-						
-						// INDEXED lookup: cve2purl has index on _to
-						FOR cveEdge IN cve2purl
-							FILTER cveEdge._to == purl._id
-							LET cve = DOCUMENT(cveEdge._from)
-							FILTER cve != null
-							FILTER cve.affected != null
+			// Step 2: Collect results (no premature sorting)
+			LET allResults = (
+				FOR metadata IN releaseMetadata
+					FOR sbomEdge IN 1..1 OUTBOUND DOCUMENT(metadata._id) release2sbom
+						FOR purlEdge IN sbom2purl
+							FILTER purlEdge._from == sbomEdge._id
+							LET purl = DOCUMENT(purlEdge._to)
+							FILTER purl != null
 							
-							FOR affected IN cve.affected
-								LET cveBasePurl = affected.package.purl != null ? 
-									affected.package.purl : 
-									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-								FILTER cveBasePurl == purl.purl
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								FILTER cve.affected != null
 								
-								// O(1) lookup for release metadata
-								LET releaseKey = CONCAT(release.name, ":", release.version)
-								LET metadata = releaseLookup[releaseKey]
-								
-								SORT cve.database_specific.cvss_base_score DESC
-								
-								RETURN {
-									cve_id: cve.id,
-									cve_summary: cve.summary,
-									cve_details: cve.details,
-									cve_severity_score: cve.database_specific.cvss_base_score,
-									cve_severity_rating: cve.database_specific.severity_rating,
-									cve_published: cve.published,
-									cve_modified: cve.modified,
-									cve_aliases: cve.aliases,
-									affected_data: affected,
-									package: purl.purl,
-									version: purlEdge.version,
-									full_purl: purlEdge.full_purl,
-									release_name: metadata.name,
-									release_version: metadata.version,
-									content_sha: metadata.content_sha,
-									project_type: metadata.project_type,
-									openssf_scorecard_score: metadata.openssf_scorecard_score,
-									synced_endpoint_count: metadata.synced_endpoint_count,
-									dependency_count: metadata.dependency_count
-								}
+								FOR affected IN cve.affected
+									LET cveBasePurl = affected.package.purl != null ? 
+										affected.package.purl : 
+										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+									FILTER cveBasePurl == purl.purl
+									
+									RETURN {
+										cve_id: cve.id,
+										cve_summary: cve.summary,
+										cve_details: cve.details,
+										cve_severity_score: cve.database_specific.cvss_base_score,
+										cve_severity_rating: cve.database_specific.severity_rating,
+										cve_published: cve.published,
+										cve_modified: cve.modified,
+										cve_aliases: cve.aliases,
+										affected_data: affected,
+										package: purl.purl,
+										version: purlEdge.version,
+										full_purl: purlEdge.full_purl,
+										release_name: metadata.name,
+										release_version: metadata.version,
+										content_sha: metadata.content_sha,
+										project_type: metadata.project_type,
+										openssf_scorecard_score: metadata.openssf_scorecard_score,
+										synced_endpoint_count: metadata.synced_endpoint_count,
+										dependency_count: metadata.dependency_count
+									}
+			)
+			
+			// Step 3: Sort ONCE and limit
+			FOR result IN allResults
+				SORT result.cve_severity_score DESC
+				LIMIT 1000
+				RETURN result
 		`
 	} else {
-		// OPTIMIZED: Same pattern with severity filter
 		query = `
 			// Step 1: Pre-calculate release metadata ONCE per release
 			LET releaseMetadata = (
@@ -724,6 +722,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 					)
 					RETURN {
 						key: CONCAT(release.name, ":", release.version),
+						_id: release._id,
 						name: release.name,
 						version: release.version,
 						content_sha: release.contentsha,
@@ -734,58 +733,56 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 					}
 			)
 			
-			// Step 2: Create lookup map for O(1) access
-			LET releaseLookup = ZIP(releaseMetadata[*].key, releaseMetadata)
-			
-			// Step 3: Hub-spoke traversal with severity filter
-			FOR release IN release
-				FOR sbomEdge IN 1..1 OUTBOUND release release2sbom
-					FOR purlEdge IN sbom2purl
-						FILTER purlEdge._from == sbomEdge._id
-						LET purl = DOCUMENT(purlEdge._to)
-						FILTER purl != null
-						
-						// INDEXED lookup with severity filter
-						FOR cveEdge IN cve2purl
-							FILTER cveEdge._to == purl._id
-							LET cve = DOCUMENT(cveEdge._from)
-							FILTER cve != null
-							FILTER cve.database_specific.cvss_base_score >= @severityScore
-							FILTER cve.affected != null
+			// Step 2: Collect results with severity filter
+			LET allResults = (
+				FOR metadata IN releaseMetadata
+					FOR sbomEdge IN 1..1 OUTBOUND DOCUMENT(metadata._id) release2sbom
+						FOR purlEdge IN sbom2purl
+							FILTER purlEdge._from == sbomEdge._id
+							LET purl = DOCUMENT(purlEdge._to)
+							FILTER purl != null
 							
-							FOR affected IN cve.affected
-								LET cveBasePurl = affected.package.purl != null ? 
-									affected.package.purl : 
-									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-								FILTER cveBasePurl == purl.purl
+							FOR cveEdge IN cve2purl
+								FILTER cveEdge._to == purl._id
+								LET cve = DOCUMENT(cveEdge._from)
+								FILTER cve != null
+								FILTER cve.database_specific.cvss_base_score >= @severityScore
+								FILTER cve.affected != null
 								
-								// O(1) lookup for release metadata
-								LET releaseKey = CONCAT(release.name, ":", release.version)
-								LET metadata = releaseLookup[releaseKey]
-								
-								SORT cve.database_specific.cvss_base_score DESC
-								
-								RETURN {
-									cve_id: cve.id,
-									cve_summary: cve.summary,
-									cve_details: cve.details,
-									cve_severity_score: cve.database_specific.cvss_base_score,
-									cve_severity_rating: cve.database_specific.severity_rating,
-									cve_published: cve.published,
-									cve_modified: cve.modified,
-									cve_aliases: cve.aliases,
-									affected_data: affected,
-									package: purl.purl,
-									version: purlEdge.version,
-									full_purl: purlEdge.full_purl,
-									release_name: metadata.name,
-									release_version: metadata.version,
-									content_sha: metadata.content_sha,
-									project_type: metadata.project_type,
-									openssf_scorecard_score: metadata.openssf_scorecard_score,
-									synced_endpoint_count: metadata.synced_endpoint_count,
-									dependency_count: metadata.dependency_count
-								}
+								FOR affected IN cve.affected
+									LET cveBasePurl = affected.package.purl != null ? 
+										affected.package.purl : 
+										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+									FILTER cveBasePurl == purl.purl
+									
+									RETURN {
+										cve_id: cve.id,
+										cve_summary: cve.summary,
+										cve_details: cve.details,
+										cve_severity_score: cve.database_specific.cvss_base_score,
+										cve_severity_rating: cve.database_specific.severity_rating,
+										cve_published: cve.published,
+										cve_modified: cve.modified,
+										cve_aliases: cve.aliases,
+										affected_data: affected,
+										package: purl.purl,
+										version: purlEdge.version,
+										full_purl: purlEdge.full_purl,
+										release_name: metadata.name,
+										release_version: metadata.version,
+										content_sha: metadata.content_sha,
+										project_type: metadata.project_type,
+										openssf_scorecard_score: metadata.openssf_scorecard_score,
+										synced_endpoint_count: metadata.synced_endpoint_count,
+										dependency_count: metadata.dependency_count
+									}
+			)
+			
+			// Step 3: Sort ONCE and limit
+			FOR result IN allResults
+				SORT result.cve_severity_score DESC
+				LIMIT 1000
+				RETURN result
 		`
 	}
 
