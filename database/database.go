@@ -91,6 +91,7 @@ func InitializeDatabase() DBConnection {
 	}
 
 	False := false
+	True := true
 	dbhost := GetEnvDefault("ARANGO_HOST", "localhost")
 	dbport := GetEnvDefault("ARANGO_PORT", "8529")
 	dbuser := GetEnvDefault("ARANGO_USER", "root")
@@ -258,11 +259,20 @@ func InitializeDatabase() DBConnection {
 		{Collection: "sbom2purl", IdxName: "sbom2purl_from", IdxField: "_from"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_to", IdxField: "_to"},
 		{Collection: "sbom2purl", IdxName: "sbom2purl_version", IdxField: "version"},
+		{Collection: "sbom2purl", IdxName: "sbom2purl_version_major", IdxField: "version_major"},
+		{Collection: "sbom2purl", IdxName: "sbom2purl_version_minor", IdxField: "version_minor"},
+		{Collection: "sbom2purl", IdxName: "sbom2purl_version_patch", IdxField: "version_patch"},
+		{Collection: "sbom2purl", IdxName: "sbom2purl_ecosystem", IdxField: "ecosystem"},
 
 		// cve2purl indexes - THE MOST CRITICAL for 400K CVE performance
 		// The _to index enables O(log n) CVE lookups per PURL instead of O(n) scans
 		{Collection: "cve2purl", IdxName: "cve2purl_from", IdxField: "_from"},
-		{Collection: "cve2purl", IdxName: "cve2purl_to", IdxField: "_to"}, // <-- CRITICAL for resolveVulnerabilities
+		{Collection: "cve2purl", IdxName: "cve2purl_to", IdxField: "_to"},
+		{Collection: "cve2purl", IdxName: "cve2purl_introduced_major", IdxField: "introduced_major"},
+		{Collection: "cve2purl", IdxName: "cve2purl_introduced_minor", IdxField: "introduced_minor"},
+		{Collection: "cve2purl", IdxName: "cve2purl_fixed_major", IdxField: "fixed_major"},
+		{Collection: "cve2purl", IdxName: "cve2purl_fixed_minor", IdxField: "fixed_minor"},
+		{Collection: "cve2purl", IdxName: "cve2purl_ecosystem", IdxField: "ecosystem"},
 	}
 
 	for _, idx := range idxList {
@@ -350,6 +360,79 @@ func InitializeDatabase() DBConnection {
 	}
 
 	// Composite index for sync lookup by release name + version
+
+	sbom2purlVersionCompIdx := "sbom2purl_to_version_components"
+	found = false
+	if indexes, err := collections["sbom2purl"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if sbom2purlVersionCompIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &True,
+			Name:   sbom2purlVersionCompIdx,
+		}
+		_, _, err = collections["sbom2purl"].EnsurePersistentIndex(ctx, []string{"_to", "version_major", "version_minor", "version_patch"}, &compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on sbom2purl", sbom2purlVersionCompIdx)
+		}
+	}
+
+	cve2purlIntroducedVersionIdx := "cve2purl_introduced_version"
+	found = false
+	if indexes, err := collections["cve2purl"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if cve2purlIntroducedVersionIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &True,
+			Name:   cve2purlIntroducedVersionIdx,
+		}
+		_, _, err = collections["cve2purl"].EnsurePersistentIndex(ctx, []string{"introduced_major", "introduced_minor", "introduced_patch"}, &compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on cve2purl", cve2purlIntroducedVersionIdx)
+		}
+	}
+
+	cve2purlFixedVersionIdx := "cve2purl_fixed_version"
+	found = false
+	if indexes, err := collections["cve2purl"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if cve2purlFixedVersionIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &True,
+			Name:   cve2purlFixedVersionIdx,
+		}
+		_, _, err = collections["cve2purl"].EnsurePersistentIndex(ctx, []string{"fixed_major", "fixed_minor", "fixed_patch"}, &compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on cve2purl", cve2purlFixedVersionIdx)
+		}
+	}
+
 	syncReleaseIdx := "sync_release_name_version"
 	found = false
 	if indexes, err := collections["sync"].Indexes(ctx); err == nil {
@@ -386,7 +469,6 @@ func InitializeDatabase() DBConnection {
 		}
 	}
 	if !found {
-		True := true
 		uniqueCompositeIdxOptions := arangodb.CreatePersistentIndexOptions{
 			Unique: &True,
 			Sparse: &False,
@@ -412,7 +494,6 @@ func InitializeDatabase() DBConnection {
 		}
 	}
 	if !found {
-		True := true
 		uniqueIdxOptions := arangodb.CreatePersistentIndexOptions{
 			Unique: &True,
 			Sparse: &False,
@@ -459,7 +540,7 @@ func InitializeDatabase() DBConnection {
 		Collections: collections,
 	}
 
-	logger.Sugar().Infof("Database initialization complete with optimized indexes for 400K+ CVE performance")
+	logger.Sugar().Infof("Database initialization complete with version-aware indexes")
 
 	return dbConnection
 }

@@ -107,9 +107,13 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 
 	// Step 1: Collect and process all PURLs
 	type purlInfo struct {
-		basePurl string
-		version  string
-		fullPurl string
+		basePurl     string
+		version      string
+		fullPurl     string
+		versionMajor *int
+		versionMinor *int
+		versionPatch *int
+		ecosystem    string
 	}
 
 	var purlInfos []purlInfo
@@ -142,10 +146,16 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 			continue
 		}
 
+		versionParsed := util.ParseSemanticVersion(parsed.Version)
+
 		purlInfos = append(purlInfos, purlInfo{
-			basePurl: basePurl,
-			version:  parsed.Version,
-			fullPurl: cleanedPurl,
+			basePurl:     basePurl,
+			version:      parsed.Version,
+			fullPurl:     cleanedPurl,
+			versionMajor: versionParsed.Major,
+			versionMinor: versionParsed.Minor,
+			versionPatch: versionParsed.Patch,
+			ecosystem:    parsed.Type,
 		})
 
 		basePurlSet[basePurl] = true
@@ -168,7 +178,7 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 
 	// Step 3: Prepare all edges for batch insertion
 
-	var edgesToCreate []edgeInfo
+	var edgesToCheck []edgeInfo
 	edgeCheckMap := make(map[string]bool) // For deduplication: "from:to:version"
 
 	for _, info := range purlInfos {
@@ -185,7 +195,7 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 		}
 		edgeCheckMap[edgeKey] = true
 
-		edgesToCreate = append(edgesToCreate, edgeInfo{
+		edgesToCheck = append(edgesToCheck, edgeInfo{
 			from:     sbomID,
 			to:       purlID,
 			version:  info.version,
@@ -193,32 +203,57 @@ func processSBOMComponents(ctx context.Context, sbom model.SBOM, sbomID string) 
 		})
 	}
 
-	if len(edgesToCreate) == 0 {
-		return nil // No edges to create
+	if len(edgesToCheck) == 0 {
+		return nil
 	}
 
-	// Step 4: Batch check which edges already exist
-	existingEdges, err := batchCheckEdgesExist(ctx, "sbom2purl", edgesToCreate)
+	// Check which edges already exist
+	existingEdges, err := batchCheckEdgesExist(ctx, "sbom2purl", edgesToCheck)
 	if err != nil {
 		return err
 	}
 
-	// Step 5: Batch insert only non-existing edges
-	var newEdges []map[string]interface{}
-	for _, edge := range edgesToCreate {
-		edgeKey := edge.from + ":" + edge.to + ":" + edge.version
+	// Build edges to insert with version metadata
+	var edgesToCreate []map[string]interface{}
+	for i, checkEdge := range edgesToCheck {
+		edgeKey := checkEdge.from + ":" + checkEdge.to + ":" + checkEdge.version
 		if !existingEdges[edgeKey] {
-			newEdges = append(newEdges, map[string]interface{}{
-				"_from":     edge.from,
-				"_to":       edge.to,
-				"version":   edge.version,
-				"full_purl": edge.fullPurl,
-			})
+			// Find the original purlInfo for this edge to get version components
+			var matchingInfo *purlInfo
+			for j := range purlInfos {
+				purlID := purlIDMap[purlInfos[j].basePurl]
+				if checkEdge.from == sbomID && checkEdge.to == purlID && checkEdge.version == purlInfos[j].version {
+					matchingInfo = &purlInfos[j]
+					break
+				}
+			}
+
+			edge := map[string]interface{}{
+				"_from":     edgesToCheck[i].from,
+				"_to":       edgesToCheck[i].to,
+				"version":   edgesToCheck[i].version,
+				"full_purl": edgesToCheck[i].fullPurl,
+			}
+
+			if matchingInfo != nil {
+				edge["ecosystem"] = matchingInfo.ecosystem
+				if matchingInfo.versionMajor != nil {
+					edge["version_major"] = *matchingInfo.versionMajor
+				}
+				if matchingInfo.versionMinor != nil {
+					edge["version_minor"] = *matchingInfo.versionMinor
+				}
+				if matchingInfo.versionPatch != nil {
+					edge["version_patch"] = *matchingInfo.versionPatch
+				}
+			}
+
+			edgesToCreate = append(edgesToCreate, edge)
 		}
 	}
 
-	if len(newEdges) > 0 {
-		err = batchInsertEdges(ctx, "sbom2purl", newEdges)
+	if len(edgesToCreate) > 0 {
+		err = batchInsertEdges(ctx, "sbom2purl", edgesToCreate)
 		if err != nil {
 			return err
 		}

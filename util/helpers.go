@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 
 	"github.com/Masterminds/semver/v3"
@@ -18,6 +19,67 @@ import (
 	"github.com/package-url/packageurl-go"
 	"gopkg.in/yaml.v2"
 )
+
+// ParsedVersion holds parsed semantic version components
+type ParsedVersion struct {
+	Major *int
+	Minor *int
+	Patch *int
+}
+
+// ParseSemanticVersion parses a version string into numeric components
+// Returns nil values for components that cannot be parsed
+func ParseSemanticVersion(version string) *ParsedVersion {
+	if version == "" {
+		return &ParsedVersion{}
+	}
+
+	// Special case for "0" (used in OSV for "from beginning")
+	if version == "0" {
+		zero := 0
+		return &ParsedVersion{Major: &zero, Minor: &zero, Patch: &zero}
+	}
+
+	// Try semver parsing first
+	v, err := semver.NewVersion(version)
+	if err == nil {
+		major := int(v.Major())
+		minor := int(v.Minor())
+		patch := int(v.Patch())
+
+		return &ParsedVersion{
+			Major: &major,
+			Minor: &minor,
+			Patch: &patch,
+		}
+	}
+
+	// Fallback: try to parse manually for versions like "1.2" or "2"
+	parts := strings.Split(version, ".")
+	result := &ParsedVersion{}
+
+	if len(parts) >= 1 {
+		if major, err := strconv.Atoi(strings.TrimSpace(parts[0])); err == nil {
+			result.Major = &major
+		}
+	}
+	if len(parts) >= 2 {
+		if minor, err := strconv.Atoi(strings.TrimSpace(parts[1])); err == nil {
+			result.Minor = &minor
+		}
+	}
+	if len(parts) >= 3 {
+		// Remove any pre-release or build metadata
+		patchStr := strings.FieldsFunc(parts[2], func(r rune) bool {
+			return r == '-' || r == '+'
+		})[0]
+		if patch, err := strconv.Atoi(strings.TrimSpace(patchStr)); err == nil {
+			result.Patch = &patch
+		}
+	}
+
+	return result
+}
 
 // GetEnvDefault is a convenience function for handling env vars
 func GetEnvDefault(key, defVal string) string {
