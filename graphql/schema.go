@@ -496,6 +496,22 @@ func extractFixedVersions(affected models.Affected) []string {
 	return fixedVersions
 }
 
+// getStringValue safely extracts a string from a pointer, returning empty string if nil
+func getStringValue(s *string) string {
+	if s == nil {
+		return ""
+	}
+	return *s
+}
+
+// getFloatValue safely extracts a float64 from a pointer, returning 0.0 if nil
+func getFloatValue(f *float64) float64 {
+	if f == nil {
+		return 0.0
+	}
+	return *f
+}
+
 // resolveReleaseVulnerabilities fetches vulnerabilities for a specific release using version-aware filtering.
 // This function performs indexed database-level filtering for 99% of version checks,
 // falling back to Go-level validation only for non-semver packages.
@@ -700,11 +716,12 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 	return vulnerabilities, nil
 }
 
-// resolveAffectedReleases fetches all releases affected by vulnerabilities of a given severity using version-aware filtering.
-// This function returns a list of all releases with dependencies vulnerable to CVEs at or above the specified severity threshold.
+// resolveAffectedReleases fetches all releases, optionally filtering by vulnerability severity.
+// This function returns ALL releases with their vulnerability information (including releases with zero CVEs).
 //
 // QUERY OPTIMIZATION:
-// - Uses two query branches: one with severity filtering, one without
+// - Uses LEFT JOIN pattern to include releases without CVEs
+// - Groups results by release to aggregate CVE information
 // - Performs indexed numeric version comparison at database level
 // - Aggregates sync counts and dependency counts in single query
 //
@@ -713,9 +730,11 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 // - HIGH: CVSS score >= 7.0
 // - MEDIUM: CVSS score >= 4.0
 // - LOW: CVSS score >= 0.1
+// - When severity specified: only returns releases with at least one matching CVE
+// - When severity = 0 (all): returns ALL releases including those with no CVEs
 //
 // PERFORMANCE:
-// - Returns 10-100 CVE candidates instead of 10,000+ (99% reduction)
+// - Returns 10-100 CVE candidates per release instead of 10,000+ (99% reduction)
 // - Query time: 100-500ms vs 5-30 seconds (50-300x faster)
 func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
@@ -723,23 +742,25 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 
 	var query string
 	if severityScore == 0.0 {
+		// When no severity filter: return ALL releases including those with no CVEs
 		query = `
-			LET results = (
-				FOR release IN release
-					LET syncCount = (
-						FOR sync IN sync
-							FILTER sync.release_name == release.name 
-							   AND sync.release_version == release.version
-							COLLECT WITH COUNT INTO count
-							RETURN count
-					)[0]
-					
-					LET depCount = (
-						FOR s IN 1..1 OUTBOUND release release2sbom
-							LIMIT 1
-							RETURN s.content.components != null ? LENGTH(s.content.components) : 0
-					)[0]
-					
+			FOR release IN release
+				LET syncCount = (
+					FOR sync IN sync
+						FILTER sync.release_name == release.name 
+						   AND sync.release_version == release.version
+						COLLECT WITH COUNT INTO count
+						RETURN count
+				)[0]
+				
+				LET depCount = (
+					FOR s IN 1..1 OUTBOUND release release2sbom
+						LIMIT 1
+						RETURN s.content.components != null ? LENGTH(s.content.components) : 0
+				)[0]
+				
+				// Collect all CVE matches for this release (may be empty array)
+				LET cveMatches = (
 					FOR sbom IN 1..1 OUTBOUND release release2sbom
 						FOR sbomEdge IN sbom2purl
 							FILTER sbomEdge._from == sbom._id
@@ -804,38 +825,45 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 										package: purl.purl,
 										version: sbomEdge.version,
 										full_purl: sbomEdge.full_purl,
-										release_name: release.name,
-										release_version: release.version,
-										content_sha: release.contentsha,
-										project_type: release.projecttype,
-										openssf_scorecard_score: release.openssf_scorecard_score,
-										synced_endpoint_count: syncCount,
-										dependency_count: depCount,
 										needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
 									}
-			)
-			FOR result IN results
-				SORT result.cve_severity_score DESC
-				RETURN result
+				)
+				
+				// Return release with aggregated CVE info (or empty CVE list)
+				LET maxSeverity = LENGTH(cveMatches) > 0 ? MAX(cveMatches[*].cve_severity_score) : null
+				
+				RETURN {
+					release_name: release.name,
+					release_version: release.version,
+					content_sha: release.contentsha,
+					project_type: release.projecttype,
+					openssf_scorecard_score: release.openssf_scorecard_score,
+					synced_endpoint_count: syncCount,
+					dependency_count: depCount,
+					max_severity: maxSeverity,
+					cve_matches: cveMatches
+				}
 		`
 	} else {
+		// When severity filter specified: only return releases WITH matching CVEs
 		query = `
-			LET results = (
-				FOR release IN release
-					LET syncCount = (
-						FOR sync IN sync
-							FILTER sync.release_name == release.name 
-							   AND sync.release_version == release.version
-							COLLECT WITH COUNT INTO count
-							RETURN count
-					)[0]
-					
-					LET depCount = (
-						FOR s IN 1..1 OUTBOUND release release2sbom
-							LIMIT 1
-							RETURN s.content.components != null ? LENGTH(s.content.components) : 0
-					)[0]
-					
+			FOR release IN release
+				LET syncCount = (
+					FOR sync IN sync
+						FILTER sync.release_name == release.name 
+						   AND sync.release_version == release.version
+						COLLECT WITH COUNT INTO count
+						RETURN count
+				)[0]
+				
+				LET depCount = (
+					FOR s IN 1..1 OUTBOUND release release2sbom
+						LIMIT 1
+						RETURN s.content.components != null ? LENGTH(s.content.components) : 0
+				)[0]
+				
+				// Collect CVE matches at or above severity threshold
+				LET cveMatches = (
 					FOR sbom IN 1..1 OUTBOUND release release2sbom
 						FOR sbomEdge IN sbom2purl
 							FILTER sbomEdge._from == sbom._id
@@ -911,9 +939,25 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 										needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
 									}
 			)
-			FOR result IN results
-				SORT result.cve_severity_score DESC
-				RETURN result
+			
+			// Only return releases WITH CVEs matching severity threshold
+			FILTER LENGTH(cveMatches) > 0
+			
+			LET maxSeverity = MAX(cveMatches[*].cve_severity_score)
+			
+			SORT maxSeverity DESC
+			
+			RETURN {
+				release_name: release.name,
+				release_version: release.version,
+				content_sha: release.contentsha,
+				project_type: release.projecttype,
+				openssf_scorecard_score: release.openssf_scorecard_score,
+				synced_endpoint_count: syncCount,
+				dependency_count: depCount,
+				max_severity: maxSeverity,
+				cve_matches: cveMatches
+			}
 		`
 	}
 
@@ -933,84 +977,123 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 	}
 	defer cursor.Close()
 
-	type Candidate struct {
-		CveID                 *string          `json:"cve_id"`
-		CveSummary            *string          `json:"cve_summary"`
-		CveDetails            *string          `json:"cve_details"`
-		CveSeverityScore      *float64         `json:"cve_severity_score"`
-		CveSeverityRating     *string          `json:"cve_severity_rating"`
-		CvePublished          *string          `json:"cve_published"`
-		CveModified           *string          `json:"cve_modified"`
-		CveAliases            []string         `json:"cve_aliases"`
-		AffectedData          *models.Affected `json:"affected_data"`
-		Package               string           `json:"package"`
-		Version               string           `json:"version"`
-		FullPurl              string           `json:"full_purl"`
-		ReleaseName           string           `json:"release_name"`
-		ReleaseVersion        string           `json:"release_version"`
-		ContentSha            string           `json:"content_sha"`
-		ProjectType           string           `json:"project_type"`
-		OpenssfScorecardScore *float64         `json:"openssf_scorecard_score"`
-		SyncedEndpointCount   int              `json:"synced_endpoint_count"`
-		DependencyCount       int              `json:"dependency_count"`
-		NeedsValidation       bool             `json:"needs_validation"`
+	// New structure to match aggregated query results
+	type AggregatedRelease struct {
+		ReleaseName           string   `json:"release_name"`
+		ReleaseVersion        string   `json:"release_version"`
+		ContentSha            string   `json:"content_sha"`
+		ProjectType           string   `json:"project_type"`
+		OpenSSFScorecardScore *float64 `json:"openssf_scorecard_score"`
+		SyncedEndpointCount   int      `json:"synced_endpoint_count"`
+		DependencyCount       int      `json:"dependency_count"`
+		MaxSeverity           *float64 `json:"max_severity"`
+		CveMatches            []struct {
+			CveID             *string          `json:"cve_id"`
+			CveSummary        *string          `json:"cve_summary"`
+			CveDetails        *string          `json:"cve_details"`
+			CveSeverityScore  *float64         `json:"cve_severity_score"`
+			CveSeverityRating *string          `json:"cve_severity_rating"`
+			CvePublished      *string          `json:"cve_published"`
+			CveModified       *string          `json:"cve_modified"`
+			CveAliases        []string         `json:"cve_aliases"`
+			AffectedData      *models.Affected `json:"affected_data"`
+			Package           string           `json:"package"`
+			Version           string           `json:"version"`
+			FullPurl          string           `json:"full_purl"`
+			NeedsValidation   bool             `json:"needs_validation"`
+		} `json:"cve_matches"`
 	}
 
-	var affectedReleases []map[string]interface{}
-	seen := make(map[string]bool)
+	var results []map[string]interface{}
+	releaseMap := make(map[string]map[string]interface{})
 
 	for cursor.HasMore() {
-		var candidate Candidate
-		_, err := cursor.ReadDocument(ctx, &candidate)
+		var aggRelease AggregatedRelease
+		_, err := cursor.ReadDocument(ctx, &aggRelease)
 		if err != nil {
 			continue
 		}
 
-		// Only validate in Go if needed
-		if candidate.NeedsValidation && candidate.AffectedData != nil {
-			if !util.IsVersionAffected(candidate.Version, *candidate.AffectedData) {
-				continue
+		releaseKey := aggRelease.ReleaseName + ":" + aggRelease.ReleaseVersion
+
+		// Process each CVE match for this release
+		for _, cveMatch := range aggRelease.CveMatches {
+			// Skip if needs validation and doesn't pass
+			if cveMatch.NeedsValidation && cveMatch.AffectedData != nil {
+				if !util.IsVersionAffected(cveMatch.Version, *cveMatch.AffectedData) {
+					continue
+				}
+			}
+
+			// Create unique key for this CVE + package + version combo
+			var cveID string
+			if cveMatch.CveID != nil {
+				cveID = *cveMatch.CveID
+			}
+			cveKey := releaseKey + ":" + cveID + ":" + cveMatch.Package + ":" + cveMatch.Version
+
+			if _, exists := releaseMap[cveKey]; !exists {
+				releaseMap[cveKey] = map[string]interface{}{
+					"cve_id":                  cveID,
+					"summary":                 getStringValue(cveMatch.CveSummary),
+					"details":                 getStringValue(cveMatch.CveDetails),
+					"severity_score":          getFloatValue(cveMatch.CveSeverityScore),
+					"severity_rating":         getStringValue(cveMatch.CveSeverityRating),
+					"published":               getStringValue(cveMatch.CvePublished),
+					"modified":                getStringValue(cveMatch.CveModified),
+					"aliases":                 cveMatch.CveAliases,
+					"package":                 cveMatch.Package,
+					"affected_version":        cveMatch.Version,
+					"full_purl":               cveMatch.FullPurl,
+					"release_name":            aggRelease.ReleaseName,
+					"release_version":         aggRelease.ReleaseVersion,
+					"content_sha":             aggRelease.ContentSha,
+					"project_type":            aggRelease.ProjectType,
+					"openssf_scorecard_score": aggRelease.OpenSSFScorecardScore,
+					"dependency_count":        aggRelease.DependencyCount,
+					"synced_endpoint_count":   aggRelease.SyncedEndpointCount,
+				}
+
+				if cveMatch.AffectedData != nil {
+					releaseMap[cveKey]["fixed_in"] = extractFixedVersions(*cveMatch.AffectedData)
+				}
 			}
 		}
 
-		cveID := ""
-		if candidate.CveID != nil {
-			cveID = *candidate.CveID
+		// If no CVE matches and severity is 0 (return all), add release with null CVE fields
+		if len(aggRelease.CveMatches) == 0 && severityScore == 0.0 {
+			releaseOnlyKey := releaseKey + ":NO_CVES"
+			if _, exists := releaseMap[releaseOnlyKey]; !exists {
+				releaseMap[releaseOnlyKey] = map[string]interface{}{
+					"cve_id":                  nil,
+					"summary":                 nil,
+					"details":                 nil,
+					"severity_score":          nil,
+					"severity_rating":         nil,
+					"published":               nil,
+					"modified":                nil,
+					"aliases":                 []string{},
+					"package":                 nil,
+					"affected_version":        nil,
+					"full_purl":               nil,
+					"fixed_in":                []string{},
+					"release_name":            aggRelease.ReleaseName,
+					"release_version":         aggRelease.ReleaseVersion,
+					"content_sha":             aggRelease.ContentSha,
+					"project_type":            aggRelease.ProjectType,
+					"openssf_scorecard_score": aggRelease.OpenSSFScorecardScore,
+					"dependency_count":        aggRelease.DependencyCount,
+					"synced_endpoint_count":   aggRelease.SyncedEndpointCount,
+				}
+			}
 		}
-		key := candidate.ReleaseName + ":" + candidate.ReleaseVersion + ":" + candidate.Package + ":" + candidate.Version + ":" + cveID
-		if seen[key] {
-			continue
-		}
-		seen[key] = true
-
-		var fixedVersions []string
-		if candidate.AffectedData != nil {
-			fixedVersions = extractFixedVersions(*candidate.AffectedData)
-		}
-
-		affectedReleases = append(affectedReleases, map[string]interface{}{
-			"cve_id":                  candidate.CveID,
-			"summary":                 candidate.CveSummary,
-			"details":                 candidate.CveDetails,
-			"severity_score":          candidate.CveSeverityScore,
-			"severity_rating":         candidate.CveSeverityRating,
-			"published":               candidate.CvePublished,
-			"modified":                candidate.CveModified,
-			"aliases":                 candidate.CveAliases,
-			"package":                 candidate.Package,
-			"affected_version":        candidate.Version,
-			"full_purl":               candidate.FullPurl,
-			"fixed_in":                fixedVersions,
-			"release_name":            candidate.ReleaseName,
-			"release_version":         candidate.ReleaseVersion,
-			"content_sha":             candidate.ContentSha,
-			"project_type":            candidate.ProjectType,
-			"openssf_scorecard_score": candidate.OpenssfScorecardScore,
-			"synced_endpoint_count":   candidate.SyncedEndpointCount,
-			"dependency_count":        candidate.DependencyCount,
-		})
 	}
-	return affectedReleases, nil
+
+	for _, release := range releaseMap {
+		results = append(results, release)
+	}
+
+	return results, nil
 }
 
 // resolveSyncedEndpoints fetches all endpoints with their synced releases and vulnerability counts

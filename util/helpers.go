@@ -222,20 +222,22 @@ func GetStringOrDefault(value, defaultValue string) string {
 	return value
 }
 
-// CleanPURL removes qualifiers (after ?) and subpath (after #) to create canonical PURL
+// CleanPURL removes qualifiers (after ?) but preserves the subpath (after #)
+// to maintain module identity (e.g. #v2)
 func CleanPURL(purlStr string) (string, error) {
 	parsed, err := packageurl.FromString(purlStr)
 	if err != nil {
 		return "", err
 	}
 
-	// Create new PURL without qualifiers and subpath
+	// Create new PURL without qualifiers
 	cleaned := packageurl.PackageURL{
 		Type:      parsed.Type,
 		Namespace: parsed.Namespace,
 		Name:      parsed.Name,
 		Version:   parsed.Version,
-		// Qualifiers and Subpath are intentionally omitted
+		Subpath:   parsed.Subpath, // <--- UPDATE: This must be preserved
+		// Qualifiers are intentionally omitted to clean the string
 	}
 
 	return strings.ToLower(cleaned.ToString()), nil
