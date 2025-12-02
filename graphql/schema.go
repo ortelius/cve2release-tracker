@@ -16,12 +16,10 @@ import (
 
 var db database.DBConnection
 
-// InitDB initializes the global database connection variable used by all resolvers.
 func InitDB(dbConn database.DBConnection) {
 	db = dbConn
 }
 
-// SeverityType defines the GraphQL enum for CVE severity levels
 var SeverityType = graphql.NewEnum(graphql.EnumConfig{
 	Name: "Severity",
 	Values: graphql.EnumValueConfigMap{
@@ -33,7 +31,6 @@ var SeverityType = graphql.NewEnum(graphql.EnumConfig{
 	},
 })
 
-// VulnerabilityCountType defines the GraphQL object for vulnerability count aggregations by severity
 var VulnerabilityCountType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "VulnerabilityCount",
 	Fields: graphql.Fields{
@@ -44,7 +41,6 @@ var VulnerabilityCountType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// VulnerabilityType defines the GraphQL object for individual CVE vulnerability records
 var VulnerabilityType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Vulnerability",
 	Fields: graphql.Fields{
@@ -64,7 +60,6 @@ var VulnerabilityType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// SBOMType defines the GraphQL object for Software Bill of Materials documents
 var SBOMType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "SBOM",
 	Fields: graphql.Fields{
@@ -83,7 +78,6 @@ var SBOMType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ScorecardDocumentationType defines the GraphQL object for OpenSSF Scorecard documentation links
 var ScorecardDocumentationType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardDocumentation",
 	Fields: graphql.Fields{
@@ -98,7 +92,6 @@ var ScorecardDocumentationType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ScorecardCheckType defines the GraphQL object for individual OpenSSF Scorecard security checks
 var ScorecardCheckType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardCheck",
 	Fields: graphql.Fields{
@@ -125,7 +118,6 @@ var ScorecardCheckType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ScorecardRepoType defines the GraphQL object for repository information in OpenSSF Scorecard results
 var ScorecardRepoType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardRepo",
 	Fields: graphql.Fields{
@@ -140,7 +132,6 @@ var ScorecardRepoType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ScorecardScoresType defines the GraphQL object for OpenSSF Scorecard version and commit information
 var ScorecardScoresType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardScores",
 	Fields: graphql.Fields{
@@ -155,7 +146,6 @@ var ScorecardScoresType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ScorecardResultType defines the GraphQL object for complete OpenSSF Scorecard assessment results
 var ScorecardResultType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ScorecardResult",
 	Fields: graphql.Fields{
@@ -186,7 +176,6 @@ var ScorecardResultType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ReleaseType defines the GraphQL object for software release/deployment records with git, docker, and vulnerability metadata
 var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Release",
 	Fields: graphql.Fields{
@@ -397,7 +386,6 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// ReleaseInfoType defines a lightweight GraphQL object for release name/version pairs used in lists
 var ReleaseInfoType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "ReleaseInfo",
 	Fields: graphql.Fields{
@@ -406,7 +394,6 @@ var ReleaseInfoType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// SyncedEndpointType defines the GraphQL object for deployment endpoints with their synced releases and vulnerability counts
 var SyncedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "SyncedEndpoint",
 	Fields: graphql.Fields{
@@ -426,7 +413,6 @@ var SyncedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// AffectedEndpointType defines the GraphQL object for endpoints affected by vulnerabilities in a release
 var AffectedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "AffectedEndpoint",
 	Fields: graphql.Fields{
@@ -439,7 +425,6 @@ var AffectedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// AffectedReleaseType defines the GraphQL object for releases affected by CVEs, including vulnerability and deployment metadata
 var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "AffectedRelease",
 	Fields: graphql.Fields{
@@ -465,7 +450,6 @@ var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-// MitigationType defines the GraphQL object for vulnerability mitigation prioritization, aggregating affected releases and endpoints per CVE
 var MitigationType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "Mitigation",
 	Fields: graphql.Fields{
@@ -482,21 +466,6 @@ var MitigationType = graphql.NewObject(graphql.ObjectConfig{
 	},
 })
 
-func extractFixedVersions(affected models.Affected) []string {
-	var fixedVersions []string
-	seen := make(map[string]bool)
-	for _, vrange := range affected.Ranges {
-		for _, event := range vrange.Events {
-			if event.Fixed != "" && !seen[event.Fixed] {
-				fixedVersions = append(fixedVersions, event.Fixed)
-				seen[event.Fixed] = true
-			}
-		}
-	}
-	return fixedVersions
-}
-
-// getStringValue safely extracts a string from a pointer, returning empty string if nil
 func getStringValue(s *string) string {
 	if s == nil {
 		return ""
@@ -504,7 +473,6 @@ func getStringValue(s *string) string {
 	return *s
 }
 
-// getFloatValue safely extracts a float64 from a pointer, returning 0.0 if nil
 func getFloatValue(f *float64) float64 {
 	if f == nil {
 		return 0.0
@@ -512,18 +480,15 @@ func getFloatValue(f *float64) float64 {
 	return *f
 }
 
-// resolveReleaseVulnerabilities fetches vulnerabilities for a specific release using version-aware filtering.
-// This function performs indexed database-level filtering for 99% of version checks,
-// falling back to Go-level validation only for non-semver packages.
-//
-// OPTIMIZATION STRATEGY:
-// - Database filtering: O(log n) indexed lookups using numeric version components
-// - Go validation: Only runs for non-semver packages (Alpine, Debian, etc.)
-// - Result: 50-300x faster than original Go-only approach
-//
-// VERSION BOUNDARY HANDLING:
-// - fixed (exclusive): version < fixed  (e.g., 1.0.0 < 1.5.0)
-// - last_affected (inclusive): version <= last_affected (e.g., 1.4.9 <= 1.4.9)
+func isVersionAffectedAny(version string, allAffected []models.Affected) bool {
+	for _, affected := range allAffected {
+		if util.IsVersionAffected(version, affected) {
+			return true
+		}
+	}
+	return false
+}
+
 func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
 	query := `
@@ -535,43 +500,14 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 					LET purl = DOCUMENT(sbomEdge._to)
 					FILTER purl != null
 					
-					// Use version-aware filtering with support for both fixed and last_affected
 					FOR cveEdge IN cve2purl
 						FILTER cveEdge._to == purl._id
 						
-						// ===============================================================
-						// VERSION-AWARE FILTERING (Database-Level Optimization)
-						// ===============================================================
-						// This filter performs indexed numeric version comparison to eliminate
-						// 99% of irrelevant CVEs before loading them into memory.
-						//
-						// CONDITIONAL LOGIC:
-						// - IF version components exist: Use indexed numeric comparison (fast path)
-						// - ELSE: Pass through to Go validation (fallback for non-semver)
-						//
-						// VERSION BOUNDARY TYPES:
-						// 1. fixed (EXCLUSIVE): version < fixed
-						//    Example: CVE affects 1.0.0 to 1.5.0 (exclusive)
-						//             1.4.9 is affected, 1.5.0 is NOT affected
-						//
-						// 2. last_affected (INCLUSIVE): version <= last_affected
-						//    Example: CVE affects 1.0.0 to 1.4.9 (inclusive)
-						//             1.4.9 is affected, 1.5.0 is NOT affected
-						//
-						// INDEX USAGE:
-						// - Uses cve2purl_introduced_version composite index
-						// - Uses cve2purl_fixed_version OR last_affected fields
-						// - Short-circuit evaluation for early exit
-						// ===============================================================
-						
-						// OPTIMIZED: Numeric version comparison using indexes
-						// Checks both introduced/fixed ranges AND introduced/last_affected ranges
 						FILTER (
 							sbomEdge.version_major != null AND 
 							cveEdge.introduced_major != null AND 
 							(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
 						) ? (
-							// Version >= introduced
 							(sbomEdge.version_major > cveEdge.introduced_major OR
 							 (sbomEdge.version_major == cveEdge.introduced_major AND 
 							  sbomEdge.version_minor > cveEdge.introduced_minor) OR
@@ -579,9 +515,7 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 							  sbomEdge.version_minor == cveEdge.introduced_minor AND 
 							  sbomEdge.version_patch >= cveEdge.introduced_patch))
 							AND
-							// Version < fixed OR version <= last_affected
 							(cveEdge.fixed_major != null ? (
-								// Check: version < fixed
 								sbomEdge.version_major < cveEdge.fixed_major OR
 								(sbomEdge.version_major == cveEdge.fixed_major AND 
 								 sbomEdge.version_minor < cveEdge.fixed_minor) OR
@@ -589,7 +523,6 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 								 sbomEdge.version_minor == cveEdge.fixed_minor AND 
 								 sbomEdge.version_patch < cveEdge.fixed_patch)
 							) : (
-								// Check: version <= last_affected
 								sbomEdge.version_major < cveEdge.last_affected_major OR
 								(sbomEdge.version_major == cveEdge.last_affected_major AND 
 								 sbomEdge.version_minor < cveEdge.last_affected_minor) OR
@@ -602,27 +535,32 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 						LET cve = DOCUMENT(cveEdge._from)
 						FILTER cve != null
 						
-						FOR affected IN cve.affected != null ? cve.affected : []
-							LET cveBasePurl = affected.package.purl != null ? 
-								affected.package.purl : 
-								CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-							FILTER cveBasePurl == purl.purl
-							RETURN {
-								cve_id: cve.id,
-								summary: cve.summary,
-								details: cve.details,
-								severity: cve.severity,
-								severity_score: cve.database_specific.cvss_base_score,
-								severity_rating: cve.database_specific.severity_rating,
-								published: cve.published,
-								modified: cve.modified,
-								aliases: cve.aliases,
-								package: purl.purl,
-								package_version: sbomEdge.version,
-								full_purl: sbomEdge.full_purl,
-								affected_data: affected,
-								needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
-							}
+						LET matchedAffected = (
+							FOR affected IN cve.affected != null ? cve.affected : []
+								LET cveBasePurl = affected.package.purl != null ? 
+									affected.package.purl : 
+									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+								FILTER cveBasePurl == purl.purl
+								RETURN affected
+						)
+						FILTER LENGTH(matchedAffected) > 0
+						
+						RETURN {
+							cve_id: cve.id,
+							summary: cve.summary,
+							details: cve.details,
+							severity: cve.severity,
+							severity_score: cve.database_specific.cvss_base_score,
+							severity_rating: cve.database_specific.severity_rating,
+							published: cve.published,
+							modified: cve.modified,
+							aliases: cve.aliases,
+							package: purl.purl,
+							package_version: sbomEdge.version,
+							full_purl: sbomEdge.full_purl,
+							all_affected: matchedAffected,
+							needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
+						}
 	`
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
 		BindVars: map[string]interface{}{
@@ -648,7 +586,7 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 		Package         string            `json:"package"`
 		PackageVersion  string            `json:"package_version"`
 		FullPurl        string            `json:"full_purl"`
-		AffectedData    models.Affected   `json:"affected_data"`
+		AllAffected     []models.Affected `json:"all_affected"`
 		NeedsValidation bool              `json:"needs_validation"`
 	}
 
@@ -662,23 +600,8 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 			continue
 		}
 
-		// ===============================================================
-		// GO-LEVEL VALIDATION (Fallback for Non-Semver Packages)
-		// ===============================================================
-		// Only runs when needs_validation=true, which occurs when:
-		// - SBOM version couldn't be parsed as semver (Alpine, Debian, etc.)
-		// - CVE range couldn't be parsed as semver
-		//
-		// This function handles:
-		// - npm semver ranges (using npm semver library)
-		// - PyPI PEP 440 versions (using PyPI version parser)
-		// - String comparison for dpkg/rpm versions
-		// - Special OSV "0" version (meaning "from the beginning")
-		//
-		// Performance: Only runs on ~1-10% of results (non-semver packages)
-		// ===============================================================
 		if result.NeedsValidation {
-			if !util.IsVersionAffected(result.PackageVersion, result.AffectedData) {
+			if !isVersionAffectedAny(result.PackageVersion, result.AllAffected) {
 				continue
 			}
 		}
@@ -710,39 +633,18 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 			"package":          result.Package,
 			"affected_version": result.PackageVersion,
 			"full_purl":        result.FullPurl,
-			"fixed_in":         extractFixedVersions(result.AffectedData),
+			"fixed_in":         util.ExtractApplicableFixedVersion(result.PackageVersion, result.AllAffected),
 		})
 	}
 	return vulnerabilities, nil
 }
 
-// resolveAffectedReleases fetches all releases, optionally filtering by vulnerability severity.
-// This function returns ALL releases with their vulnerability information (including releases with zero CVEs).
-//
-// QUERY OPTIMIZATION:
-// - Uses LEFT JOIN pattern to include releases without CVEs
-// - Groups results by release to aggregate CVE information
-// - Performs indexed numeric version comparison at database level
-// - Aggregates sync counts and dependency counts in single query
-//
-// SEVERITY MAPPING:
-// - CRITICAL: CVSS score >= 9.0
-// - HIGH: CVSS score >= 7.0
-// - MEDIUM: CVSS score >= 4.0
-// - LOW: CVSS score >= 0.1
-// - When severity specified: only returns releases with at least one matching CVE
-// - When severity = 0 (all): returns ALL releases including those with no CVEs
-//
-// PERFORMANCE:
-// - Returns 10-100 CVE candidates per release instead of 10,000+ (99% reduction)
-// - Query time: 100-500ms vs 5-30 seconds (50-300x faster)
 func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
 	severityScore := util.GetSeverityScore(severity)
 
 	var query string
 	if severityScore == 0.0 {
-		// When no severity filter: return ALL releases including those with no CVEs
 		query = `
 			FOR release IN release
 				LET syncCount = (
@@ -759,7 +661,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 						RETURN s.content.components != null ? LENGTH(s.content.components) : 0
 				)[0]
 				
-				// Collect all CVE matches for this release (may be empty array)
 				LET cveMatches = (
 					FOR sbom IN 1..1 OUTBOUND release release2sbom
 						FOR sbomEdge IN sbom2purl
@@ -770,13 +671,11 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 							FOR cveEdge IN cve2purl
 								FILTER cveEdge._to == purl._id
 								
-								// OPTIMIZED: Version-aware filtering with last_affected support
 								FILTER (
 									sbomEdge.version_major != null AND 
 									cveEdge.introduced_major != null AND 
 									(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
 								) ? (
-									// Version >= introduced
 									(sbomEdge.version_major > cveEdge.introduced_major OR
 									 (sbomEdge.version_major == cveEdge.introduced_major AND 
 									  sbomEdge.version_minor > cveEdge.introduced_minor) OR
@@ -784,9 +683,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									  sbomEdge.version_minor == cveEdge.introduced_minor AND 
 									  sbomEdge.version_patch >= cveEdge.introduced_patch))
 									AND
-									// Version < fixed OR version <= last_affected
 									(cveEdge.fixed_major != null ? (
-										// Check: version < fixed
 										sbomEdge.version_major < cveEdge.fixed_major OR
 										(sbomEdge.version_major == cveEdge.fixed_major AND 
 										 sbomEdge.version_minor < cveEdge.fixed_minor) OR
@@ -794,7 +691,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 										 sbomEdge.version_minor == cveEdge.fixed_minor AND 
 										 sbomEdge.version_patch < cveEdge.fixed_patch)
 									) : (
-										// Check: version <= last_affected
 										sbomEdge.version_major < cveEdge.last_affected_major OR
 										(sbomEdge.version_major == cveEdge.last_affected_major AND 
 										 sbomEdge.version_minor < cveEdge.last_affected_minor) OR
@@ -807,29 +703,33 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 								LET cve = DOCUMENT(cveEdge._from)
 								FILTER cve != null
 								
-								FOR affected IN cve.affected != null ? cve.affected : []
-									LET cveBasePurl = affected.package.purl != null ? 
-										affected.package.purl : 
-										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-									FILTER cveBasePurl == purl.purl
-									RETURN {
-										cve_id: cve.id,
-										cve_summary: cve.summary,
-										cve_details: cve.details,
-										cve_severity_score: cve.database_specific.cvss_base_score,
-										cve_severity_rating: cve.database_specific.severity_rating,
-										cve_published: cve.published,
-										cve_modified: cve.modified,
-										cve_aliases: cve.aliases,
-										affected_data: affected,
-										package: purl.purl,
-										version: sbomEdge.version,
-										full_purl: sbomEdge.full_purl,
-										needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
-									}
+								LET matchedAffected = (
+									FOR affected IN cve.affected != null ? cve.affected : []
+										LET cveBasePurl = affected.package.purl != null ? 
+											affected.package.purl : 
+											CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+										FILTER cveBasePurl == purl.purl
+										RETURN affected
+								)
+								FILTER LENGTH(matchedAffected) > 0
+								
+								RETURN {
+									cve_id: cve.id,
+									cve_summary: cve.summary,
+									cve_details: cve.details,
+									cve_severity_score: cve.database_specific.cvss_base_score,
+									cve_severity_rating: cve.database_specific.severity_rating,
+									cve_published: cve.published,
+									cve_modified: cve.modified,
+									cve_aliases: cve.aliases,
+									all_affected: matchedAffected,
+									package: purl.purl,
+									version: sbomEdge.version,
+									full_purl: sbomEdge.full_purl,
+									needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
+								}
 				)
 				
-				// Return release with aggregated CVE info (or empty CVE list)
 				LET maxSeverity = LENGTH(cveMatches) > 0 ? MAX(cveMatches[*].cve_severity_score) : null
 				
 				RETURN {
@@ -845,7 +745,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 				}
 		`
 	} else {
-		// When severity filter specified: only return releases WITH matching CVEs
 		query = `
 			FOR release IN release
 				LET syncCount = (
@@ -862,7 +761,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 						RETURN s.content.components != null ? LENGTH(s.content.components) : 0
 				)[0]
 				
-				// Collect CVE matches at or above severity threshold
 				LET cveMatches = (
 					FOR sbom IN 1..1 OUTBOUND release release2sbom
 						FOR sbomEdge IN sbom2purl
@@ -873,13 +771,11 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 							FOR cveEdge IN cve2purl
 								FILTER cveEdge._to == purl._id
 								
-								// OPTIMIZED: Version-aware filtering with last_affected support
 								FILTER (
 									sbomEdge.version_major != null AND 
 									cveEdge.introduced_major != null AND 
 									(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
 								) ? (
-									// Version >= introduced
 									(sbomEdge.version_major > cveEdge.introduced_major OR
 									 (sbomEdge.version_major == cveEdge.introduced_major AND 
 									  sbomEdge.version_minor > cveEdge.introduced_minor) OR
@@ -887,9 +783,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									  sbomEdge.version_minor == cveEdge.introduced_minor AND 
 									  sbomEdge.version_patch >= cveEdge.introduced_patch))
 									AND
-									// Version < fixed OR version <= last_affected
 									(cveEdge.fixed_major != null ? (
-										// Check: version < fixed
 										sbomEdge.version_major < cveEdge.fixed_major OR
 										(sbomEdge.version_major == cveEdge.fixed_major AND 
 										 sbomEdge.version_minor < cveEdge.fixed_minor) OR
@@ -897,7 +791,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 										 sbomEdge.version_minor == cveEdge.fixed_minor AND 
 										 sbomEdge.version_patch < cveEdge.fixed_patch)
 									) : (
-										// Check: version <= last_affected
 										sbomEdge.version_major < cveEdge.last_affected_major OR
 										(sbomEdge.version_major == cveEdge.last_affected_major AND 
 										 sbomEdge.version_minor < cveEdge.last_affected_minor) OR
@@ -925,7 +818,7 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 										cve_published: cve.published,
 										cve_modified: cve.modified,
 										cve_aliases: cve.aliases,
-										affected_data: affected,
+										all_affected: matchedAffected,
 										package: purl.purl,
 										version: sbomEdge.version,
 										full_purl: sbomEdge.full_purl,
@@ -940,7 +833,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 									}
 			)
 			
-			// Only return releases WITH CVEs matching severity threshold
 			FILTER LENGTH(cveMatches) > 0
 			
 			LET maxSeverity = MAX(cveMatches[*].cve_severity_score)
@@ -977,7 +869,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 	}
 	defer cursor.Close()
 
-	// New structure to match aggregated query results
 	type AggregatedRelease struct {
 		ReleaseName           string   `json:"release_name"`
 		ReleaseVersion        string   `json:"release_version"`
@@ -988,19 +879,19 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 		DependencyCount       int      `json:"dependency_count"`
 		MaxSeverity           *float64 `json:"max_severity"`
 		CveMatches            []struct {
-			CveID             *string          `json:"cve_id"`
-			CveSummary        *string          `json:"cve_summary"`
-			CveDetails        *string          `json:"cve_details"`
-			CveSeverityScore  *float64         `json:"cve_severity_score"`
-			CveSeverityRating *string          `json:"cve_severity_rating"`
-			CvePublished      *string          `json:"cve_published"`
-			CveModified       *string          `json:"cve_modified"`
-			CveAliases        []string         `json:"cve_aliases"`
-			AffectedData      *models.Affected `json:"affected_data"`
-			Package           string           `json:"package"`
-			Version           string           `json:"version"`
-			FullPurl          string           `json:"full_purl"`
-			NeedsValidation   bool             `json:"needs_validation"`
+			CveID             *string           `json:"cve_id"`
+			CveSummary        *string           `json:"cve_summary"`
+			CveDetails        *string           `json:"cve_details"`
+			CveSeverityScore  *float64          `json:"cve_severity_score"`
+			CveSeverityRating *string           `json:"cve_severity_rating"`
+			CvePublished      *string           `json:"cve_published"`
+			CveModified       *string           `json:"cve_modified"`
+			CveAliases        []string          `json:"cve_aliases"`
+			AllAffected       []models.Affected `json:"all_affected"`
+			Package           string            `json:"package"`
+			Version           string            `json:"version"`
+			FullPurl          string            `json:"full_purl"`
+			NeedsValidation   bool              `json:"needs_validation"`
 		} `json:"cve_matches"`
 	}
 
@@ -1016,16 +907,13 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 
 		releaseKey := aggRelease.ReleaseName + ":" + aggRelease.ReleaseVersion
 
-		// Process each CVE match for this release
 		for _, cveMatch := range aggRelease.CveMatches {
-			// Skip if needs validation and doesn't pass
-			if cveMatch.NeedsValidation && cveMatch.AffectedData != nil {
-				if !util.IsVersionAffected(cveMatch.Version, *cveMatch.AffectedData) {
+			if cveMatch.NeedsValidation && len(cveMatch.AllAffected) > 0 {
+				if !isVersionAffectedAny(cveMatch.Version, cveMatch.AllAffected) {
 					continue
 				}
 			}
 
-			// Create unique key for this CVE + package + version combo
 			var cveID string
 			if cveMatch.CveID != nil {
 				cveID = *cveMatch.CveID
@@ -1054,13 +942,12 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 					"synced_endpoint_count":   aggRelease.SyncedEndpointCount,
 				}
 
-				if cveMatch.AffectedData != nil {
-					releaseMap[cveKey]["fixed_in"] = extractFixedVersions(*cveMatch.AffectedData)
+				if len(cveMatch.AllAffected) > 0 {
+					releaseMap[cveKey]["fixed_in"] = util.ExtractApplicableFixedVersion(cveMatch.Version, cveMatch.AllAffected)
 				}
 			}
 		}
 
-		// If no CVE matches and severity is 0 (return all), add release with null CVE fields
 		if len(aggRelease.CveMatches) == 0 && severityScore == 0.0 {
 			releaseOnlyKey := releaseKey + ":NO_CVES"
 			if _, exists := releaseMap[releaseOnlyKey]; !exists {
@@ -1096,7 +983,6 @@ func resolveAffectedReleases(severity string) ([]map[string]interface{}, error) 
 	return results, nil
 }
 
-// resolveSyncedEndpoints fetches all endpoints with their synced releases and vulnerability counts
 func resolveSyncedEndpoints(limit int) ([]map[string]interface{}, error) {
 	ctx := context.Background()
 
@@ -1233,7 +1119,6 @@ func resolveSyncedEndpoints(limit int) ([]map[string]interface{}, error) {
 	return endpoints, nil
 }
 
-// resolveAffectedEndpoints fetches all endpoints that have a specific release synced to them
 func resolveAffectedEndpoints(name, version string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
 
@@ -1293,18 +1178,6 @@ func resolveAffectedEndpoints(name, version string) ([]map[string]interface{}, e
 	return endpoints, nil
 }
 
-// resolveVulnerabilities fetches all vulnerabilities across all releases with aggregated counts using version-aware filtering.
-// This function powers the "mitigations" view, grouping vulnerabilities by CVE + package + version
-// and counting how many releases and endpoints are affected by each unique vulnerability.
-//
-// AGGREGATION STRATEGY:
-// - Groups by: CVE ID + package + affected version
-// - Counts: Number of releases affected, number of endpoints affected
-// - Sorts by: Severity score (highest first)
-//
-// USE CASE:
-// Used to prioritize mitigation efforts by showing which vulnerabilities have the widest impact
-// across the organization's infrastructure.
 func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 	ctx := context.Background()
 
@@ -1320,13 +1193,11 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 						FOR cveEdge IN cve2purl
 							FILTER cveEdge._to == purl._id
 							
-							// OPTIMIZED: Version-aware filtering with last_affected support
 							FILTER (
 								purlEdge.version_major != null AND 
 								cveEdge.introduced_major != null AND 
 								(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
 							) ? (
-								// Version >= introduced
 								(purlEdge.version_major > cveEdge.introduced_major OR
 								 (purlEdge.version_major == cveEdge.introduced_major AND 
 								  purlEdge.version_minor > cveEdge.introduced_minor) OR
@@ -1334,9 +1205,7 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 								  purlEdge.version_minor == cveEdge.introduced_minor AND 
 								  purlEdge.version_patch >= cveEdge.introduced_patch))
 								AND
-								// Version < fixed OR version <= last_affected
 								(cveEdge.fixed_major != null ? (
-									// Check: version < fixed
 									purlEdge.version_major < cveEdge.fixed_major OR
 									(purlEdge.version_major == cveEdge.fixed_major AND 
 									 purlEdge.version_minor < cveEdge.fixed_minor) OR
@@ -1344,7 +1213,6 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 									 purlEdge.version_minor == cveEdge.fixed_minor AND 
 									 purlEdge.version_patch < cveEdge.fixed_patch)
 								) : (
-									// Check: version <= last_affected
 									purlEdge.version_major < cveEdge.last_affected_major OR
 									(purlEdge.version_major == cveEdge.last_affected_major AND 
 									 purlEdge.version_minor < cveEdge.last_affected_minor) OR
@@ -1358,18 +1226,17 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 							FILTER cve != null
 							FILTER cve.database_specific.cvss_base_score != null
 							
-							LET affectedMatch = FIRST(
+							LET matchedAffected = (
 								FOR affected IN cve.affected != null ? cve.affected : []
 									FILTER affected.package != null
 									LET cveBasePurl = affected.package.purl != null ? 
 										affected.package.purl : 
 										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
 									FILTER cveBasePurl == purl.purl
-									LIMIT 1
 									RETURN affected
 							)
 							
-							FILTER affectedMatch != null
+							FILTER LENGTH(matchedAffected) > 0
 							
 							LET fixedVersions = (
 								FOR vrange IN affectedMatch.ranges != null ? affectedMatch.ranges : []
@@ -1389,7 +1256,7 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 								fixed_in: fixedVersions,
 								release_name: release.name,
 								release_version: release.version,
-								affected_data: affectedMatch,
+								all_affected: matchedAffected,
 								needs_validation: purlEdge.version_major == null OR cveEdge.introduced_major == null
 							}
 		)
@@ -1450,18 +1317,18 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 	defer cursor.Close()
 
 	type VulnerabilityResult struct {
-		CveID             string          `json:"cve_id"`
-		Summary           string          `json:"summary"`
-		SeverityScore     float64         `json:"severity_score"`
-		SeverityRating    string          `json:"severity_rating"`
-		Package           string          `json:"package"`
-		AffectedVersion   string          `json:"affected_version"`
-		FullPurl          string          `json:"full_purl"`
-		FixedIn           []string        `json:"fixed_in"`
-		AffectedReleases  int             `json:"affected_releases"`
-		AffectedEndpoints int             `json:"affected_endpoints"`
-		AffectedData      models.Affected `json:"affected_data"`
-		NeedsValidation   bool            `json:"needs_validation"`
+		CveID             string            `json:"cve_id"`
+		Summary           string            `json:"summary"`
+		SeverityScore     float64           `json:"severity_score"`
+		SeverityRating    string            `json:"severity_rating"`
+		Package           string            `json:"package"`
+		AffectedVersion   string            `json:"affected_version"`
+		FullPurl          string            `json:"full_purl"`
+		FixedIn           []string          `json:"fixed_in"`
+		AffectedReleases  int               `json:"affected_releases"`
+		AffectedEndpoints int               `json:"affected_endpoints"`
+		AllAffected       []models.Affected `json:"all_affected"`
+		NeedsValidation   bool              `json:"needs_validation"`
 	}
 
 	var vulnerabilities []map[string]interface{}
@@ -1474,9 +1341,8 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 			continue
 		}
 
-		// Only validate in Go if needed
 		if result.NeedsValidation {
-			if !util.IsVersionAffected(result.AffectedVersion, result.AffectedData) {
+			if !isVersionAffectedAny(result.AffectedVersion, result.AllAffected) {
 				continue
 			}
 		}
@@ -1495,7 +1361,7 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 			"package":            result.Package,
 			"affected_version":   result.AffectedVersion,
 			"full_purl":          result.FullPurl,
-			"fixed_in":           result.FixedIn,
+			"fixed_in":           util.ExtractApplicableFixedVersion(result.AffectedVersion, result.AllAffected),
 			"affected_releases":  result.AffectedReleases,
 			"affected_endpoints": result.AffectedEndpoints,
 		})
@@ -1503,7 +1369,6 @@ func resolveVulnerabilities(limit int) ([]map[string]interface{}, error) {
 	return vulnerabilities, nil
 }
 
-// CreateSchema generates and returns the configured GraphQL schema for the API.
 func CreateSchema() (graphql.Schema, error) {
 	rootQuery := graphql.NewObject(graphql.ObjectConfig{
 		Name: "Query",

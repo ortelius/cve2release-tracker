@@ -645,3 +645,213 @@ func GetSeverityScore(severity string) float64 {
 		return 0.0 // unknown severity defaults to 0.0
 	}
 }
+
+// Add these functions to util/helpers.go
+
+// ExtractApplicableFixedVersion checks all affected entries and returns the fix version for the matching range
+func ExtractApplicableFixedVersion(currentVersion string, allAffected []models.Affected) []string {
+	// Try each affected entry until we find one where the version is in range
+	for _, affected := range allAffected {
+		result := extractFixedFromSingleAffected(currentVersion, affected)
+		if len(result) > 0 {
+			return result
+		}
+	}
+	// No match found, return all fixed versions as fallback
+	return extractAllFixedFromMultiple(allAffected)
+}
+
+func extractFixedFromSingleAffected(currentVersion string, affected models.Affected) []string {
+	currentV, err := semver.NewVersion(currentVersion)
+	if err != nil {
+		npmV, npmErr := npm.NewVersion(currentVersion)
+		if npmErr == nil {
+			return extractApplicableFixedVersionNPM(npmV, affected)
+		}
+
+		pepV, pepErr := pep440.Parse(currentVersion)
+		if pepErr == nil {
+			return extractApplicableFixedVersionPython(pepV, affected)
+		}
+
+		return []string{}
+	}
+
+	for _, vrange := range affected.Ranges {
+		if vrange.Type != models.RangeEcosystem && vrange.Type != models.RangeSemVer {
+			continue
+		}
+
+		var introduced, fixed, lastAffected string
+
+		for _, event := range vrange.Events {
+			if event.Introduced != "" {
+				introduced = event.Introduced
+			}
+			if event.Fixed != "" {
+				fixed = event.Fixed
+			}
+			if event.LastAffected != "" {
+				lastAffected = event.LastAffected
+			}
+		}
+
+		inRange := true
+
+		if introduced != "" && introduced != "0" {
+			introV, err := semver.NewVersion(introduced)
+			if err == nil && currentV.LessThan(introV) {
+				inRange = false
+			}
+		}
+
+		if inRange {
+			if fixed != "" {
+				fixV, err := semver.NewVersion(fixed)
+				if err == nil {
+					if currentV.GreaterThan(fixV) || currentV.Equal(fixV) {
+						inRange = false
+					}
+				}
+			} else if lastAffected != "" {
+				lastV, err := semver.NewVersion(lastAffected)
+				if err == nil {
+					if currentV.GreaterThan(lastV) {
+						inRange = false
+					}
+				}
+			}
+		}
+
+		if inRange {
+			if fixed != "" {
+				return []string{fixed}
+			}
+			if lastAffected != "" {
+				return []string{}
+			}
+		}
+	}
+
+	return []string{}
+}
+
+func extractApplicableFixedVersionNPM(currentV npm.Version, affected models.Affected) []string {
+	for _, vrange := range affected.Ranges {
+		if vrange.Type != models.RangeEcosystem && vrange.Type != models.RangeSemVer {
+			continue
+		}
+
+		var introduced, fixed, lastAffected string
+		for _, event := range vrange.Events {
+			if event.Introduced != "" {
+				introduced = event.Introduced
+			}
+			if event.Fixed != "" {
+				fixed = event.Fixed
+			}
+			if event.LastAffected != "" {
+				lastAffected = event.LastAffected
+			}
+		}
+
+		inRange := true
+
+		if introduced != "" && introduced != "0" {
+			introV, err := npm.NewVersion(introduced)
+			if err == nil && currentV.LessThan(introV) {
+				inRange = false
+			}
+		}
+
+		if inRange {
+			if fixed != "" {
+				fixV, err := npm.NewVersion(fixed)
+				if err == nil {
+					if currentV.GreaterThan(fixV) || currentV.Equal(fixV) {
+						inRange = false
+					}
+				}
+			} else if lastAffected != "" {
+				lastV, err := npm.NewVersion(lastAffected)
+				if err == nil && currentV.GreaterThan(lastV) {
+					inRange = false
+				}
+			}
+		}
+
+		if inRange && fixed != "" {
+			return []string{fixed}
+		}
+	}
+
+	return []string{}
+}
+
+func extractApplicableFixedVersionPython(currentV pep440.Version, affected models.Affected) []string {
+	for _, vrange := range affected.Ranges {
+		if vrange.Type != models.RangeEcosystem && vrange.Type != models.RangeSemVer {
+			continue
+		}
+
+		var introduced, fixed, lastAffected string
+		for _, event := range vrange.Events {
+			if event.Introduced != "" {
+				introduced = event.Introduced
+			}
+			if event.Fixed != "" {
+				fixed = event.Fixed
+			}
+			if event.LastAffected != "" {
+				lastAffected = event.LastAffected
+			}
+		}
+
+		inRange := true
+
+		if introduced != "" && introduced != "0" {
+			introV, err := pep440.Parse(introduced)
+			if err == nil && currentV.LessThan(introV) {
+				inRange = false
+			}
+		}
+
+		if inRange {
+			if fixed != "" {
+				fixV, err := pep440.Parse(fixed)
+				if err == nil {
+					if currentV.GreaterThan(fixV) || currentV.Equal(fixV) {
+						inRange = false
+					}
+				}
+			} else if lastAffected != "" {
+				lastV, err := pep440.Parse(lastAffected)
+				if err == nil && currentV.GreaterThan(lastV) {
+					inRange = false
+				}
+			}
+		}
+
+		if inRange && fixed != "" {
+			return []string{fixed}
+		}
+	}
+
+	return []string{}
+}
+
+func extractAllFixedFromMultiple(allAffected []models.Affected) []string {
+	var fixedVersions []string
+	seen := make(map[string]bool)
+	for _, affected := range allAffected {
+		for _, vrange := range affected.Ranges {
+			for _, event := range vrange.Events {
+				if event.Fixed != "" && !seen[event.Fixed] {
+					fixedVersions = append(fixedVersions, event.Fixed)
+					seen[event.Fixed] = true
+				}
+			}
+		}
+	}
+	return fixedVersions
+}
