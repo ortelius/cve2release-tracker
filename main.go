@@ -473,6 +473,7 @@ func GraphQLHandler(schema graphql.Schema) fiber.Handler {
 // ============================================================================
 
 // PostReleaseWithSBOM handles POST requests for creating a release with its SBOM
+// PostReleaseWithSBOM handles POST requests for creating a release with its SBOM
 func PostReleaseWithSBOM(c *fiber.Ctx) error {
 	var req model.ReleaseWithSBOM
 
@@ -516,6 +517,9 @@ func PostReleaseWithSBOM(c *fiber.Ctx) error {
 	if req.SBOM.ObjType == "" {
 		req.SBOM.ObjType = "SBOM"
 	}
+
+	// Parse and set version components from the version string
+	req.ParseAndSetVersion()
 
 	ctx := context.Background()
 

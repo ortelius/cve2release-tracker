@@ -3,55 +3,56 @@ package model
 
 import (
 	"time"
+
+	"github.com/ortelius/pdvd-backend/v12/util"
 )
 
-// ProjectRelease defines a Version of an Component for a List View
 type ProjectRelease struct {
-	Key                      string    `json:"_key,omitempty"`
-	Cid                      string    `json:"cid,omitempty"`
-	ObjType                  string    `json:"objtype,omitempty"`
-	Name                     string    `json:"name"`
-	Version                  string    `json:"version"`
-	ProjectType              string    `json:"projecttype,omitempty"`
-	ContentSha               string    `json:"contentsha,omitempty"` // Git commit or Docker SHA for deduplication
-	Basename                 string    `json:"basename,omitempty"`
-	BuildDate                time.Time `json:"builddate,omitempty"`
-	BuildID                  string    `json:"buildid,omitempty"`
-	BuildNum                 string    `json:"buildnum,omitempty"`
-	BuildURL                 string    `json:"buildurl,omitempty"`
-	DockerRepo               string    `json:"dockerrepo,omitempty"`
-	DockerSha                string    `json:"dockersha,omitempty"`
-	DockerTag                string    `json:"dockertag,omitempty"`
-	GitBranch                string    `json:"gitbranch,omitempty"`
-	GitBranchCreateCommit    string    `json:"gitbranchcreatecommit,omitempty"`
-	GitBranchCreateTimestamp time.Time `json:"gitbranchcreatetimestamp,omitempty"`
-	GitBranchParent          string    `json:"gitbranchparent,omitempty"`
-	GitCommit                string    `json:"gitcommit,omitempty"`
-	GitCommitAuthors         string    `json:"gitcommitauthors,omitempty"`
-	GitCommittersCnt         string    `json:"gitcommittescnt,omitempty"`
-	GitCommitTimestamp       time.Time `json:"gitcommittimestamp,omitempty"`
-	GitContribPercentage     string    `json:"gitcontribpercentage,omitempty"`
-	GitLinesAdded            string    `json:"gitlinesadded,omitempty"`
-	GitLinesDeleted          string    `json:"gitlinesdeleted,omitempty"`
-	GitLinesTotal            string    `json:"gitlinestotal,omitempty"`
-	GitOrg                   string    `json:"gitorg,omitempty"`
-	GitPrevCompCommit        string    `json:"gitpreviouscomponentcommit,omitempty"`
-	GitRepo                  string    `json:"gitrepo,omitempty"`
-	GitRepoProject           string    `json:"gitrepoproject,omitempty"`
-	GitSignedOffBy           string    `json:"gitsignedoffby,omitempty"`
-	GitTag                   string    `json:"gittag,omitempty"`
-	GitTotalCommittersCnt    string    `json:"gittotalcommittescnt,omitempty"`
-	GitURL                   string    `json:"giturl,omitempty"`
-	GitVerifyCommit          bool      `json:"gitverifycommit,omitempty"`
-
-	// OpenSSF Scorecard Results (https://github.com/ossf/scorecard)
-	// Uses custom ScorecardAPIResponse struct that matches the API response format
-	OpenSSFScorecardScore float64               `json:"openssf_scorecard_score,omitempty"` // Aggregate score 0-10
-	ScorecardResult       *ScorecardAPIResponse `json:"scorecard_result,omitempty"`        // Complete result with all checks
+	Key                      string                `json:"_key,omitempty"`
+	Cid                      string                `json:"cid,omitempty"`
+	ObjType                  string                `json:"objtype,omitempty"`
+	Name                     string                `json:"name"`
+	Version                  string                `json:"version"`
+	VersionMajor             *int                  `json:"version_major,omitempty"`
+	VersionMinor             *int                  `json:"version_minor,omitempty"`
+	VersionPatch             *int                  `json:"version_patch,omitempty"`
+	VersionPrerelease        string                `json:"version_prerelease,omitempty"`
+	VersionBuildMetadata     string                `json:"version_build_metadata,omitempty"`
+	ProjectType              string                `json:"projecttype,omitempty"`
+	ContentSha               string                `json:"contentsha,omitempty"`
+	Basename                 string                `json:"basename,omitempty"`
+	BuildDate                time.Time             `json:"builddate,omitempty"`
+	BuildID                  string                `json:"buildid,omitempty"`
+	BuildNum                 string                `json:"buildnum,omitempty"`
+	BuildURL                 string                `json:"buildurl,omitempty"`
+	DockerRepo               string                `json:"dockerrepo,omitempty"`
+	DockerSha                string                `json:"dockersha,omitempty"`
+	DockerTag                string                `json:"dockertag,omitempty"`
+	GitBranch                string                `json:"gitbranch,omitempty"`
+	GitBranchCreateCommit    string                `json:"gitbranchcreatecommit,omitempty"`
+	GitBranchCreateTimestamp time.Time             `json:"gitbranchcreatetimestamp,omitempty"`
+	GitBranchParent          string                `json:"gitbranchparent,omitempty"`
+	GitCommit                string                `json:"gitcommit,omitempty"`
+	GitCommitAuthors         string                `json:"gitcommitauthors,omitempty"`
+	GitCommittersCnt         string                `json:"gitcommittescnt,omitempty"`
+	GitCommitTimestamp       time.Time             `json:"gitcommittimestamp,omitempty"`
+	GitContribPercentage     string                `json:"gitcontribpercentage,omitempty"`
+	GitLinesAdded            string                `json:"gitlinesadded,omitempty"`
+	GitLinesDeleted          string                `json:"gitlinesdeleted,omitempty"`
+	GitLinesTotal            string                `json:"gitlinestotal,omitempty"`
+	GitOrg                   string                `json:"gitorg,omitempty"`
+	GitPrevCompCommit        string                `json:"gitpreviouscomponentcommit,omitempty"`
+	GitRepo                  string                `json:"gitrepo,omitempty"`
+	GitRepoProject           string                `json:"gitrepoproject,omitempty"`
+	GitSignedOffBy           string                `json:"gitsignedoffby,omitempty"`
+	GitTag                   string                `json:"gittag,omitempty"`
+	GitTotalCommittersCnt    string                `json:"gittotalcommittescnt,omitempty"`
+	GitURL                   string                `json:"giturl,omitempty"`
+	GitVerifyCommit          bool                  `json:"gitverifycommit,omitempty"`
+	OpenSSFScorecardScore    float64               `json:"openssf_scorecard_score,omitempty"`
+	ScorecardResult          *ScorecardAPIResponse `json:"scorecard_result,omitempty"`
 }
 
-// ScorecardAPIResponse represents the OpenSSF Scorecard API response
-// This matches the structure returned by https://api.securityscorecards.dev/
 type ScorecardAPIResponse struct {
 	Date      string   `json:"date"`
 	Repo      Repo     `json:"repo"`
@@ -61,19 +62,16 @@ type ScorecardAPIResponse struct {
 	Metadata  []string `json:"metadata,omitempty"`
 }
 
-// Repo contains repository information
 type Repo struct {
 	Name   string `json:"name"`
 	Commit string `json:"commit"`
 }
 
-// Scores contains scorecard version information
 type Scores struct {
 	Version string `json:"version"`
 	Commit  string `json:"commit"`
 }
 
-// Check represents a single security check result
 type Check struct {
 	Name          string        `json:"name"`
 	Score         int           `json:"score"`
@@ -82,16 +80,32 @@ type Check struct {
 	Documentation Documentation `json:"documentation"`
 }
 
-// Documentation provides information about a check
 type Documentation struct {
 	Short string `json:"short"`
 	URL   string `json:"url"`
 }
 
-// NewProjectRelease is the contructor that sets the appropriate default values
 func NewProjectRelease() *ProjectRelease {
 	return &ProjectRelease{
 		ObjType:               "ProjectRelease",
-		OpenSSFScorecardScore: -1, // -1 indicates not yet assessed
+		OpenSSFScorecardScore: -1,
+	}
+}
+
+func (r *ProjectRelease) ParseAndSetVersion() {
+	if r.Version == "" {
+		return
+	}
+
+	cleanedVersion := util.CleanVersion(r.Version)
+	r.Version = cleanedVersion
+
+	parsed := util.ParseSemver(cleanedVersion)
+	if parsed != nil {
+		r.VersionMajor = parsed.Major
+		r.VersionMinor = parsed.Minor
+		r.VersionPatch = parsed.Patch
+		r.VersionPrerelease = parsed.Prerelease
+		r.VersionBuildMetadata = parsed.BuildMetadata
 	}
 }

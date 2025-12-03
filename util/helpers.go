@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strconv"
 	"strings"
 
@@ -854,4 +855,105 @@ func extractAllFixedFromMultiple(allAffected []models.Affected) []string {
 		}
 	}
 	return fixedVersions
+}
+
+// ============================================================================
+// Version Parsing Functions
+// ============================================================================
+
+var versionPrefixPattern = regexp.MustCompile(`^.*?-v(\d+)`)
+var semverPattern = regexp.MustCompile(`^(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z\-\.]+))?(?:\+([0-9A-Za-z\-\.]+))?$`)
+
+// CleanVersion removes branch prefixes from version strings
+// Examples:
+//   - "main-v12.0.1376-g7ac6f3" -> "12.0.1376-g7ac6f3"
+//   - "develop-v2.3.4" -> "2.3.4"
+//   - "v1.2.3" -> "v1.2.3" (unchanged)
+func CleanVersion(version string) string {
+	if version == "" {
+		return version
+	}
+	if versionPrefixPattern.MatchString(version) {
+		matches := versionPrefixPattern.FindStringSubmatch(version)
+		if len(matches) > 1 {
+			cleaned := versionPrefixPattern.ReplaceAllString(version, matches[1])
+			return cleaned
+		}
+	}
+	return version
+}
+
+// ParsedSemver holds all components of a semantic version
+type ParsedSemver struct {
+	Major         *int
+	Minor         *int
+	Patch         *int
+	Prerelease    string
+	BuildMetadata string
+}
+
+// ParseSemver parses a semantic version string into all its components
+// Returns nil if the version cannot be parsed
+func ParseSemver(version string) *ParsedSemver {
+	if version == "" {
+		return nil
+	}
+
+	result := &ParsedSemver{}
+
+	// Try full semver regex first
+	matches := semverPattern.FindStringSubmatch(version)
+	if len(matches) > 0 {
+		// Parse major.minor.patch using existing ParseSemanticVersion
+		parsed := ParseSemanticVersion(version)
+		if parsed != nil {
+			result.Major = parsed.Major
+			result.Minor = parsed.Minor
+			result.Patch = parsed.Patch
+		}
+
+		// Extract prerelease (group 4)
+		if len(matches) > 4 && matches[4] != "" {
+			result.Prerelease = matches[4]
+		}
+
+		// Extract build metadata (group 5)
+		if len(matches) > 5 && matches[5] != "" {
+			result.BuildMetadata = matches[5]
+		}
+
+		return result
+	}
+
+	// Fallback: try to parse what we can
+	parsed := ParseSemanticVersion(version)
+	if parsed != nil {
+		result.Major = parsed.Major
+		result.Minor = parsed.Minor
+		result.Patch = parsed.Patch
+	}
+
+	// Try to extract prerelease and build metadata manually
+	// Format: major.minor.patch-prerelease+buildmetadata
+	parts := strings.SplitN(version, "-", 2)
+	if len(parts) == 2 {
+		remainder := parts[1]
+		plusParts := strings.SplitN(remainder, "+", 2)
+		if len(plusParts) == 2 {
+			result.Prerelease = plusParts[0]
+			result.BuildMetadata = plusParts[1]
+		} else {
+			result.Prerelease = remainder
+		}
+	}
+
+	// Check for build metadata without prerelease
+	if result.Prerelease == "" && strings.Contains(version, "+") {
+		plusParts := strings.SplitN(version, "+", 2)
+		if len(plusParts) == 2 {
+			result.BuildMetadata = plusParts[1]
+		}
+	}
+
+	return result
 }
