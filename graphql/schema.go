@@ -442,6 +442,7 @@ var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 		"fixed_in":                &graphql.Field{Type: graphql.NewList(graphql.String)},
 		"release_name":            &graphql.Field{Type: graphql.String},
 		"release_version":         &graphql.Field{Type: graphql.String},
+		"version_count":           &graphql.Field{Type: graphql.Int},
 		"content_sha":             &graphql.Field{Type: graphql.String},
 		"project_type":            &graphql.Field{Type: graphql.String},
 		"openssf_scorecard_score": &graphql.Field{Type: graphql.Float},
@@ -751,6 +752,10 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 				RETURN {
 					release_name: release.name,
 					release_version: release.version,
+					version_major: release.version_major,
+					version_minor: release.version_minor,
+					version_patch: release.version_patch,
+					version_prerelease: release.version_prerelease,
 					content_sha: release.contentsha,
 					project_type: release.projecttype,
 					openssf_scorecard_score: release.openssf_scorecard_score,
@@ -761,9 +766,41 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 				}
 		)
 		
-		FOR item IN allReleases
-			SORT item.max_severity DESC
-			RETURN item
+		// Group by release name and get latest version
+		FOR release IN allReleases
+			COLLECT name = release.release_name INTO groupedReleases = release
+			
+			LET sortedReleases = (
+				FOR r IN groupedReleases
+					SORT r.version_major != null ? r.version_major : -1 DESC,
+					     r.version_minor != null ? r.version_minor : -1 DESC,
+					     r.version_patch != null ? r.version_patch : -1 DESC,
+					     r.version_prerelease != null && r.version_prerelease != "" ? 1 : 0 ASC,
+					     r.version_prerelease ASC,
+					     r.release_version DESC
+					RETURN r
+			)
+			
+			LET latestRelease = FIRST(sortedReleases)
+			LET versionCount = LENGTH(sortedReleases)
+			
+			// Return only the latest version with aggregated info
+			RETURN {
+				release_name: latestRelease.release_name,
+				latest_version: latestRelease.release_version,
+				version_major: latestRelease.version_major,
+				version_minor: latestRelease.version_minor,
+				version_patch: latestRelease.version_patch,
+				version_prerelease: latestRelease.version_prerelease,
+				version_count: versionCount,
+				content_sha: latestRelease.content_sha,
+				project_type: latestRelease.project_type,
+				openssf_scorecard_score: latestRelease.openssf_scorecard_score,
+				synced_endpoint_count: latestRelease.synced_endpoint_count,
+				dependency_count: latestRelease.dependency_count,
+				max_severity: latestRelease.max_severity,
+				cve_matches: latestRelease.cve_matches
+			}
 	`
 
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
@@ -778,7 +815,12 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 
 	type AggregatedRelease struct {
 		ReleaseName           string   `json:"release_name"`
-		ReleaseVersion        string   `json:"release_version"`
+		LatestVersion         string   `json:"latest_version"`
+		VersionMajor          *int     `json:"version_major"`
+		VersionMinor          *int     `json:"version_minor"`
+		VersionPatch          *int     `json:"version_patch"`
+		VersionPrerelease     string   `json:"version_prerelease"`
+		VersionCount          int      `json:"version_count"`
 		ContentSha            string   `json:"content_sha"`
 		ProjectType           string   `json:"project_type"`
 		OpenSSFScorecardScore *float64 `json:"openssf_scorecard_score"`
@@ -811,7 +853,7 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 			continue
 		}
 
-		releaseKey := aggRelease.ReleaseName + ":" + aggRelease.ReleaseVersion
+		releaseKey := aggRelease.ReleaseName + ":" + aggRelease.LatestVersion
 		seen := make(map[string]bool)
 
 		for _, cveMatch := range aggRelease.CveMatches {
@@ -843,7 +885,8 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 					"affected_version":        cveMatch.Version,
 					"full_purl":               cveMatch.FullPurl,
 					"release_name":            aggRelease.ReleaseName,
-					"release_version":         aggRelease.ReleaseVersion,
+					"release_version":         aggRelease.LatestVersion,
+					"version_count":           aggRelease.VersionCount,
 					"content_sha":             aggRelease.ContentSha,
 					"project_type":            aggRelease.ProjectType,
 					"openssf_scorecard_score": aggRelease.OpenSSFScorecardScore,
@@ -878,7 +921,8 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 					"full_purl":               nil,
 					"fixed_in":                []string{},
 					"release_name":            aggRelease.ReleaseName,
-					"release_version":         aggRelease.ReleaseVersion,
+					"release_version":         aggRelease.LatestVersion,
+					"version_count":           aggRelease.VersionCount,
 					"content_sha":             aggRelease.ContentSha,
 					"project_type":            aggRelease.ProjectType,
 					"openssf_scorecard_score": aggRelease.OpenSSFScorecardScore,

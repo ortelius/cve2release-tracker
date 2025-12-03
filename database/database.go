@@ -360,6 +360,33 @@ func InitializeDatabase() DBConnection {
 		}
 	}
 
+	// Composite index for semantic version sorting
+	releaseVersionSortIdx := "release_version_sort"
+	found = false
+	if indexes, err := collections["release"].Indexes(ctx); err == nil {
+		for _, index := range indexes {
+			if releaseVersionSortIdx == index.Name {
+				found = true
+				break
+			}
+		}
+	}
+	if !found {
+		compositeIdxOptions := arangodb.CreatePersistentIndexOptions{
+			Unique: &False,
+			Sparse: &True, // Sparse because older records may not have these fields
+			Name:   releaseVersionSortIdx,
+		}
+		_, _, err = collections["release"].EnsurePersistentIndex(ctx,
+			[]string{"name", "version_major", "version_minor", "version_patch"},
+			&compositeIdxOptions)
+		if err != nil {
+			logger.Sugar().Fatalln("Error creating composite index:", err)
+		} else {
+			logger.Sugar().Infof("Created composite index: %s on release", releaseVersionSortIdx)
+		}
+	}
+
 	// Composite index for sync lookup by release name + version
 
 	sbom2purlVersionCompIdx := "sbom2purl_to_version_components"
