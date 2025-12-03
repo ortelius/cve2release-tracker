@@ -601,12 +601,22 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 		}
 
 		if result.NeedsValidation {
-			if !isVersionAffectedAny(result.PackageVersion, result.AllAffected) {
-				continue
+			// FIX: Allow UNKNOWN or empty versions to proceed (fail open)
+			// Only filter out if we have a valid version string that turns out to be safe.
+			if result.PackageVersion != "" && result.PackageVersion != "UNKNOWN" {
+				if !isVersionAffectedAny(result.PackageVersion, result.AllAffected) {
+					continue
+				}
 			}
 		}
 
-		key := result.CveID + ":" + result.Package + ":" + result.PackageVersion
+		// FIX: Use FullPurl in the unique key to distinguish between the same package
+		// appearing in different directories (e.g. one 7.0.2 and one UNKNOWN).
+		key := result.CveID + ":" + result.FullPurl
+		if result.FullPurl == "" {
+			key = result.CveID + ":" + result.Package + ":" + result.PackageVersion
+		}
+
 		if seen[key] {
 			continue
 		}
