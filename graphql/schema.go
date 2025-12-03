@@ -603,7 +603,11 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 		if result.NeedsValidation {
 			// FIX: Allow UNKNOWN or empty versions to proceed (fail open)
 			// Only filter out if we have a valid version string that turns out to be safe.
-			if result.PackageVersion != "" && result.PackageVersion != "UNKNOWN" {
+			if result.PackageVersion == "" {
+				result.PackageVersion = "UNKNOWN"
+			}
+
+			if result.PackageVersion != "UNKNOWN" {
 				if !isVersionAffectedAny(result.PackageVersion, result.AllAffected) {
 					continue
 				}
