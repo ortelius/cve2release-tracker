@@ -666,6 +666,9 @@ func PostSyncWithEndpoint(c *fiber.Ctx) error {
 		})
 	}
 
+	// Clean the version to match how it's stored (removes branch prefixes)
+	req.ReleaseVersion = util.CleanVersion(req.ReleaseVersion)
+
 	// Validate required fields for Sync
 	if req.ReleaseName == "" || req.ReleaseVersion == "" || req.EndpointName == "" {
 		return c.Status(fiber.StatusBadRequest).JSON(SyncResponse{
