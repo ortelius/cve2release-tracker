@@ -659,149 +659,136 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 	severityScore := util.GetSeverityScore(severity)
 
 	query := `
-		LET allReleases = (
-			FOR release IN release
-				LET syncCount = (
-					FOR sync IN sync
-						FILTER sync.release_name == release.name 
-						   AND sync.release_version == release.version
-						COLLECT WITH COUNT INTO count
-						RETURN count
-				)[0]
-				
-				LET depCount = (
-					FOR s IN 1..1 OUTBOUND release release2sbom
-						LIMIT 1
-						RETURN s.content.components != null ? LENGTH(s.content.components) : 0
-				)[0]
-				
-				LET cveMatches = (
-					FOR sbom IN 1..1 OUTBOUND release release2sbom
-						FOR sbomEdge IN sbom2purl
-							FILTER sbomEdge._from == sbom._id
-							LET purl = DOCUMENT(sbomEdge._to)
-							FILTER purl != null
-							
-							FOR cveEdge IN cve2purl
-								FILTER cveEdge._to == purl._id
-								
-								FILTER (
-									sbomEdge.version_major != null AND 
-									cveEdge.introduced_major != null AND 
-									(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
-								) ? (
-									(sbomEdge.version_major > cveEdge.introduced_major OR
-									 (sbomEdge.version_major == cveEdge.introduced_major AND 
-									  sbomEdge.version_minor > cveEdge.introduced_minor) OR
-									 (sbomEdge.version_major == cveEdge.introduced_major AND 
-									  sbomEdge.version_minor == cveEdge.introduced_minor AND 
-									  sbomEdge.version_patch >= cveEdge.introduced_patch))
-									AND
-									(cveEdge.fixed_major != null ? (
-										sbomEdge.version_major < cveEdge.fixed_major OR
-										(sbomEdge.version_major == cveEdge.fixed_major AND 
-										 sbomEdge.version_minor < cveEdge.fixed_minor) OR
-										(sbomEdge.version_major == cveEdge.fixed_major AND 
-										 sbomEdge.version_minor == cveEdge.fixed_minor AND 
-										 sbomEdge.version_patch < cveEdge.fixed_patch)
-									) : (
-										sbomEdge.version_major < cveEdge.last_affected_major OR
-										(sbomEdge.version_major == cveEdge.last_affected_major AND 
-										 sbomEdge.version_minor < cveEdge.last_affected_minor) OR
-										(sbomEdge.version_major == cveEdge.last_affected_major AND 
-										 sbomEdge.version_minor == cveEdge.last_affected_minor AND 
-										 sbomEdge.version_patch <= cveEdge.last_affected_patch)
-									))
-								) : true
-								
-								LET cve = DOCUMENT(cveEdge._from)
-								FILTER cve != null
-								FILTER @severityScore == 0.0 OR cve.database_specific.cvss_base_score >= @severityScore
-								
-								LET matchedAffected = (
-									FOR affected IN cve.affected != null ? cve.affected : []
-										LET cveBasePurl = affected.package.purl != null ? 
-											affected.package.purl : 
-											CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
-										FILTER cveBasePurl == purl.purl
-										RETURN affected
-								)
-								FILTER LENGTH(matchedAffected) > 0
-								
-								RETURN {
-									cve_id: cve.id,
-									cve_summary: cve.summary,
-									cve_details: cve.details,
-									cve_severity_score: cve.database_specific.cvss_base_score,
-									cve_severity_rating: cve.database_specific.severity_rating,
-									cve_published: cve.published,
-									cve_modified: cve.modified,
-									cve_aliases: cve.aliases,
-									all_affected: matchedAffected,
-									package: purl.purl,
-									version: sbomEdge.version,
-									full_purl: sbomEdge.full_purl,
-									needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
-								}
-				)
-				
-				FILTER @severityScore == 0.0 OR LENGTH(cveMatches) > 0
-				
-				LET maxSeverity = LENGTH(cveMatches) > 0 ? MAX(cveMatches[*].cve_severity_score) : 0
-				
-				RETURN {
-					release_name: release.name,
-					release_version: release.version,
-					version_major: release.version_major,
-					version_minor: release.version_minor,
-					version_patch: release.version_patch,
-					version_prerelease: release.version_prerelease,
-					content_sha: release.contentsha,
-					project_type: release.projecttype,
-					openssf_scorecard_score: release.openssf_scorecard_score,
-					synced_endpoint_count: syncCount,
-					dependency_count: depCount,
-					max_severity: maxSeverity,
-					cve_matches: cveMatches
-				}
-		)
-		
-		// Group by release name and get latest version
-		FOR release IN allReleases
-			COLLECT name = release.release_name INTO groupedReleases = release
+		FOR r IN release
+			// 1. Group by name immediately to find the latest version first
+			COLLECT name = r.name INTO groupedReleases = r
+
+			// 2. Sort and pick ONLY the latest release per project
+			LET latestRelease = (
+				FOR release IN groupedReleases
+					SORT release.version_major != null ? release.version_major : -1 DESC,
+						release.version_minor != null ? release.version_minor : -1 DESC,
+						release.version_patch != null ? release.version_patch : -1 DESC,
+						release.version_prerelease != null && release.version_prerelease != "" ? 1 : 0 ASC,
+						release.version_prerelease ASC,
+						release.version DESC
+					LIMIT 1
+					RETURN release
+			)[0]
 			
-			LET sortedReleases = (
-				FOR r IN groupedReleases
-					SORT r.version_major != null ? r.version_major : -1 DESC,
-					     r.version_minor != null ? r.version_minor : -1 DESC,
-					     r.version_patch != null ? r.version_patch : -1 DESC,
-					     r.version_prerelease != null && r.version_prerelease != "" ? 1 : 0 ASC,
-					     r.version_prerelease ASC,
-					     r.release_version DESC
-					RETURN r
+			LET versionCount = LENGTH(groupedReleases)
+
+			// 3. Perform expensive lookups ONLY on the single latest release
+			LET sbomData = (
+				FOR s IN 1..1 OUTBOUND latestRelease release2sbom
+					LIMIT 1
+					RETURN { 
+						id: s._id, 
+						component_count: s.content.components != null ? LENGTH(s.content.components) : 0 
+					}
+			)[0]
+
+			LET syncCount = (
+				FOR sync IN sync
+					FILTER sync.release_name == latestRelease.name 
+					AND sync.release_version == latestRelease.version
+					COLLECT WITH COUNT INTO count
+					RETURN count
+			)[0]
+
+			LET cveMatches = (
+				// Optimization: We already found the SBOM ID above, no need to traverse again
+				FILTER sbomData != null
+				FOR sbomEdge IN sbom2purl
+					FILTER sbomEdge._from == sbomData.id
+					LET purl = DOCUMENT(sbomEdge._to)
+					FILTER purl != null
+					
+					FOR cveEdge IN cve2purl
+						FILTER cveEdge._to == purl._id
+						
+						// Keep existing complex SemVer logic
+						FILTER (
+							sbomEdge.version_major != null AND 
+							cveEdge.introduced_major != null AND 
+							(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
+						) ? (
+							(sbomEdge.version_major > cveEdge.introduced_major OR
+							(sbomEdge.version_major == cveEdge.introduced_major AND 
+							sbomEdge.version_minor > cveEdge.introduced_minor) OR
+							(sbomEdge.version_major == cveEdge.introduced_major AND 
+							sbomEdge.version_minor == cveEdge.introduced_minor AND 
+							sbomEdge.version_patch >= cveEdge.introduced_patch))
+							AND
+							(cveEdge.fixed_major != null ? (
+								sbomEdge.version_major < cveEdge.fixed_major OR
+								(sbomEdge.version_major == cveEdge.fixed_major AND 
+								sbomEdge.version_minor < cveEdge.fixed_minor) OR
+								(sbomEdge.version_major == cveEdge.fixed_major AND 
+								sbomEdge.version_minor == cveEdge.fixed_minor AND 
+								sbomEdge.version_patch < cveEdge.fixed_patch)
+							) : (
+								sbomEdge.version_major < cveEdge.last_affected_major OR
+								(sbomEdge.version_major == cveEdge.last_affected_major AND 
+								sbomEdge.version_minor < cveEdge.last_affected_minor) OR
+								(sbomEdge.version_major == cveEdge.last_affected_major AND 
+								sbomEdge.version_minor == cveEdge.last_affected_minor AND 
+								sbomEdge.version_patch <= cveEdge.last_affected_patch)
+							))
+						) : true
+						
+						LET cve = DOCUMENT(cveEdge._from)
+						FILTER cve != null
+						FILTER @severityScore == 0.0 OR cve.database_specific.cvss_base_score >= @severityScore
+						
+						LET matchedAffected = (
+							FOR affected IN cve.affected != null ? cve.affected : []
+								LET cveBasePurl = affected.package.purl != null ? 
+									affected.package.purl : 
+									CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+								FILTER cveBasePurl == purl.purl
+								RETURN affected
+						)
+						FILTER LENGTH(matchedAffected) > 0
+						
+						RETURN {
+							cve_id: cve.id,
+							cve_summary: cve.summary,
+							cve_details: cve.details,
+							cve_severity_score: cve.database_specific.cvss_base_score,
+							cve_severity_rating: cve.database_specific.severity_rating,
+							cve_published: cve.published,
+							cve_modified: cve.modified,
+							cve_aliases: cve.aliases,
+							all_affected: matchedAffected,
+							package: purl.purl,
+							version: sbomEdge.version,
+							full_purl: sbomEdge.full_purl,
+							needs_validation: sbomEdge.version_major == null OR cveEdge.introduced_major == null
+						}
 			)
+
+			FILTER @severityScore == 0.0 OR LENGTH(cveMatches) > 0
 			
-			LET latestRelease = FIRST(sortedReleases)
-			LET versionCount = LENGTH(sortedReleases)
-			
-			// Return only the latest version with aggregated info
+			LET maxSeverity = LENGTH(cveMatches) > 0 ? MAX(cveMatches[*].cve_severity_score) : 0
+
 			RETURN {
-				release_name: latestRelease.release_name,
-				latest_version: latestRelease.release_version,
+				release_name: latestRelease.name,
+				latest_version: latestRelease.version,
 				version_major: latestRelease.version_major,
 				version_minor: latestRelease.version_minor,
 				version_patch: latestRelease.version_patch,
 				version_prerelease: latestRelease.version_prerelease,
 				version_count: versionCount,
-				content_sha: latestRelease.content_sha,
-				project_type: latestRelease.project_type,
+				content_sha: latestRelease.contentsha,
+				project_type: latestRelease.projecttype,
 				openssf_scorecard_score: latestRelease.openssf_scorecard_score,
-				synced_endpoint_count: latestRelease.synced_endpoint_count,
-				dependency_count: latestRelease.dependency_count,
-				max_severity: latestRelease.max_severity,
-				cve_matches: latestRelease.cve_matches
+				synced_endpoint_count: syncCount,
+				dependency_count: sbomData != null ? sbomData.component_count : 0,
+				max_severity: maxSeverity,
+				cve_matches: cveMatches
 			}
-	`
+			`
 
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
 		BindVars: map[string]interface{}{
