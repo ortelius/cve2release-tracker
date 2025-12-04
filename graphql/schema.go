@@ -3,6 +3,7 @@ package graphql
 
 import (
 	"context"
+	"net/url"
 	"strings"
 	"time"
 
@@ -336,9 +337,19 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 				release, ok := p.Source.(model.ProjectRelease)
 				if !ok {
-					return nil, nil
+					// FIX: Return empty array instead of nil
+					return []map[string]interface{}{}, nil
 				}
-				return resolveReleaseVulnerabilities(release.Name, release.Version)
+				vulnerabilities, err := resolveReleaseVulnerabilities(release.Name, release.Version)
+				if err != nil {
+					// FIX: Return empty array on error instead of nil
+					return []map[string]interface{}{}, nil
+				}
+				// FIX: Ensure we always return an array, even if empty
+				if vulnerabilities == nil {
+					return []map[string]interface{}{}, nil
+				}
+				return vulnerabilities, nil
 			},
 		},
 
@@ -363,9 +374,16 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 				release, ok := p.Source.(model.ProjectRelease)
 				if !ok {
-					return nil, nil
+					return []map[string]interface{}{}, nil
 				}
-				return resolveAffectedEndpoints(release.Name, release.Version)
+				endpoints, err := resolveAffectedEndpoints(release.Name, release.Version)
+				if err != nil {
+					return []map[string]interface{}{}, nil
+				}
+				if endpoints == nil {
+					return []map[string]interface{}{}, nil
+				}
+				return endpoints, nil
 			},
 		},
 
@@ -492,6 +510,15 @@ func isVersionAffectedAny(version string, allAffected []models.Affected) bool {
 
 func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface{}, error) {
 	ctx := context.Background()
+
+	// URL decode the name to handle slashes that may be encoded as %2F
+	// Example: "deployhub%2Fms-ui" becomes "deployhub/ms-ui"
+	decodedName, err := url.QueryUnescape(name)
+	if err != nil {
+		// If decoding fails, use the original name
+		decodedName = name
+	}
+
 	query := `
 		FOR release IN release
 			FILTER release.name == @name AND release.version == @version
@@ -565,12 +592,13 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 	`
 	cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
 		BindVars: map[string]interface{}{
-			"name":    name,
+			"name":    decodedName,
 			"version": version,
 		},
 	})
 	if err != nil {
-		return nil, err
+		// FIX: Return empty array instead of nil on error
+		return []map[string]interface{}{}, err
 	}
 	defer cursor.Close()
 
@@ -650,6 +678,11 @@ func resolveReleaseVulnerabilities(name, version string) ([]map[string]interface
 			"full_purl":        result.FullPurl,
 			"fixed_in":         util.ExtractApplicableFixedVersion(result.PackageVersion, result.AllAffected),
 		})
+	}
+
+	// FIX: Always return a non-nil slice
+	if vulnerabilities == nil {
+		return []map[string]interface{}{}, nil
 	}
 	return vulnerabilities, nil
 }
@@ -1085,7 +1118,7 @@ func resolveAffectedEndpoints(name, version string) ([]map[string]interface{}, e
 		},
 	})
 	if err != nil {
-		return nil, err
+		return []map[string]interface{}{}, nil
 	}
 	defer cursor.Close()
 
@@ -1114,6 +1147,11 @@ func resolveAffectedEndpoints(name, version string) ([]map[string]interface{}, e
 			"last_sync":     result.LastSync.Format(time.RFC3339),
 			"status":        result.Status,
 		})
+	}
+
+	// FIX: Always return non-nil slice
+	if endpoints == nil {
+		return []map[string]interface{}{}, nil
 	}
 	return endpoints, nil
 }
@@ -1322,6 +1360,15 @@ func CreateSchema() (graphql.Schema, error) {
 				Resolve: func(p graphql.ResolveParams) (interface{}, error) {
 					name := p.Args["name"].(string)
 					version := p.Args["version"].(string)
+
+					// URL decode the name to handle slashes that may be encoded as %2F
+					// Example: "deployhub%2Fms-ui" becomes "deployhub/ms-ui"
+					decodedName, err := url.QueryUnescape(name)
+					if err != nil {
+						// If decoding fails, use the original name
+						decodedName = name
+					}
+
 					ctx := context.Background()
 					query := `
 						FOR r IN release
@@ -1331,7 +1378,7 @@ func CreateSchema() (graphql.Schema, error) {
 					`
 					cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
 						BindVars: map[string]interface{}{
-							"name":    name,
+							"name":    decodedName,
 							"version": version,
 						},
 					})

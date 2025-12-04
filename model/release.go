@@ -51,6 +51,8 @@ type ProjectRelease struct {
 	GitVerifyCommit          bool                  `json:"gitverifycommit,omitempty"`
 	OpenSSFScorecardScore    float64               `json:"openssf_scorecard_score,omitempty"`
 	ScorecardResult          *ScorecardAPIResponse `json:"scorecard_result,omitempty"`
+	VulnerabilityCount       int                   `json:"vulnerability_count,omitempty"`
+	PrevVersionVulnCount     int                   `json:"prev_version_vuln_count,omitempty"`
 }
 
 type ScorecardAPIResponse struct {
