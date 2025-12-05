@@ -353,6 +353,53 @@ var ReleaseType = graphql.NewObject(graphql.ObjectConfig{
 			},
 		},
 
+		"dependency_count": &graphql.Field{
+			Type: graphql.Int,
+			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
+				release, ok := p.Source.(model.ProjectRelease)
+				if !ok {
+					return 0, nil
+				}
+
+				ctx := context.Background()
+				query := `
+					FOR release IN release
+						FILTER release.name == @name AND release.version == @version
+						FOR sbom IN 1..1 OUTBOUND release release2sbom
+							LIMIT 1
+							LET dependencyCount = (
+								FOR edge IN sbom2purl
+									FILTER edge._from == sbom._id
+									COLLECT fullPurl = edge.full_purl
+									RETURN 1
+							)
+							RETURN LENGTH(dependencyCount)
+				`
+
+				cursor, err := db.Database.Query(ctx, query, &arangodb.QueryOptions{
+					BindVars: map[string]interface{}{
+						"name":    release.Name,
+						"version": release.Version,
+					},
+				})
+				if err != nil {
+					return 0, err
+				}
+				defer cursor.Close()
+
+				if cursor.HasMore() {
+					var count int
+					_, err := cursor.ReadDocument(ctx, &count)
+					if err != nil {
+						return 0, err
+					}
+					return count, nil
+				}
+
+				return 0, nil
+			},
+		},
+
 		"synced_endpoint_count": &graphql.Field{
 			Type: graphql.Int,
 			Resolve: func(p graphql.ResolveParams) (interface{}, error) {
@@ -446,26 +493,28 @@ var AffectedEndpointType = graphql.NewObject(graphql.ObjectConfig{
 var AffectedReleaseType = graphql.NewObject(graphql.ObjectConfig{
 	Name: "AffectedRelease",
 	Fields: graphql.Fields{
-		"cve_id":                  &graphql.Field{Type: graphql.String},
-		"summary":                 &graphql.Field{Type: graphql.String},
-		"details":                 &graphql.Field{Type: graphql.String},
-		"severity_score":          &graphql.Field{Type: graphql.Float},
-		"severity_rating":         &graphql.Field{Type: graphql.String},
-		"published":               &graphql.Field{Type: graphql.String},
-		"modified":                &graphql.Field{Type: graphql.String},
-		"aliases":                 &graphql.Field{Type: graphql.NewList(graphql.String)},
-		"package":                 &graphql.Field{Type: graphql.String},
-		"affected_version":        &graphql.Field{Type: graphql.String},
-		"full_purl":               &graphql.Field{Type: graphql.String},
-		"fixed_in":                &graphql.Field{Type: graphql.NewList(graphql.String)},
-		"release_name":            &graphql.Field{Type: graphql.String},
-		"release_version":         &graphql.Field{Type: graphql.String},
-		"version_count":           &graphql.Field{Type: graphql.Int},
-		"content_sha":             &graphql.Field{Type: graphql.String},
-		"project_type":            &graphql.Field{Type: graphql.String},
-		"openssf_scorecard_score": &graphql.Field{Type: graphql.Float},
-		"dependency_count":        &graphql.Field{Type: graphql.Int},
-		"synced_endpoint_count":   &graphql.Field{Type: graphql.Int},
+		"cve_id":                     &graphql.Field{Type: graphql.String},
+		"summary":                    &graphql.Field{Type: graphql.String},
+		"details":                    &graphql.Field{Type: graphql.String},
+		"severity_score":             &graphql.Field{Type: graphql.Float},
+		"severity_rating":            &graphql.Field{Type: graphql.String},
+		"published":                  &graphql.Field{Type: graphql.String},
+		"modified":                   &graphql.Field{Type: graphql.String},
+		"aliases":                    &graphql.Field{Type: graphql.NewList(graphql.String)},
+		"package":                    &graphql.Field{Type: graphql.String},
+		"affected_version":           &graphql.Field{Type: graphql.String},
+		"full_purl":                  &graphql.Field{Type: graphql.String},
+		"fixed_in":                   &graphql.Field{Type: graphql.NewList(graphql.String)},
+		"release_name":               &graphql.Field{Type: graphql.String},
+		"release_version":            &graphql.Field{Type: graphql.String},
+		"version_count":              &graphql.Field{Type: graphql.Int},
+		"content_sha":                &graphql.Field{Type: graphql.String},
+		"project_type":               &graphql.Field{Type: graphql.String},
+		"openssf_scorecard_score":    &graphql.Field{Type: graphql.Float},
+		"dependency_count":           &graphql.Field{Type: graphql.Int},
+		"synced_endpoint_count":      &graphql.Field{Type: graphql.Int},
+		"vulnerability_count":        &graphql.Field{Type: graphql.Int},
+		"vulnerability_count_delta":  &graphql.Field{Type: graphql.Int},
 	},
 })
 
@@ -716,10 +765,18 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 				FOR s IN 1..1 OUTBOUND latestRelease release2sbom
 					LIMIT 1
 					RETURN { 
-						id: s._id, 
-						component_count: s.content.components != null ? LENGTH(s.content.components) : 0 
+						id: s._id
 					}
 			)[0]
+
+			// 4. Count unique dependencies by full_purl (package + version combination)
+			LET dependencyCount = (
+				FILTER sbomData != null
+				FOR edge IN sbom2purl
+					FILTER edge._from == sbomData.id
+					COLLECT fullPurl = edge.full_purl
+					RETURN 1
+			)
 
 			LET syncCount = (
 				FOR sync IN sync
@@ -804,6 +861,104 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 			FILTER @severityScore == 0.0 OR LENGTH(cveMatches) > 0
 			
 			LET maxSeverity = LENGTH(cveMatches) > 0 ? MAX(cveMatches[*].cve_severity_score) : 0
+			
+			// Calculate vulnerability count for this release (unique CVEs)
+			LET uniqueCves = (
+				FOR match IN cveMatches
+					COLLECT cveId = match.cve_id
+					RETURN 1
+			)
+			LET vulnerabilityCount = LENGTH(uniqueCves)
+			
+			// Get previous version to calculate delta
+			LET previousRelease = (
+				FOR release IN groupedReleases
+					FILTER release._key != latestRelease._key
+					SORT release.version_major != null ? release.version_major : -1 DESC,
+						release.version_minor != null ? release.version_minor : -1 DESC,
+						release.version_patch != null ? release.version_patch : -1 DESC,
+						release.version_prerelease != null && release.version_prerelease != "" ? 1 : 0 ASC,
+						release.version_prerelease ASC,
+						release.version DESC
+					LIMIT 1
+					RETURN release
+			)[0]
+			
+			// Calculate vulnerability count for previous version
+			LET prevVulnCount = previousRelease != null ? (
+				LET prevSbomData = (
+					FOR s IN 1..1 OUTBOUND previousRelease release2sbom
+						LIMIT 1
+						RETURN { id: s._id }
+				)[0]
+				
+				FILTER prevSbomData != null
+				
+				LET prevCveMatches = (
+					FOR sbomEdge IN sbom2purl
+						FILTER sbomEdge._from == prevSbomData.id
+						LET purl = DOCUMENT(sbomEdge._to)
+						FILTER purl != null
+						
+						FOR cveEdge IN cve2purl
+							FILTER cveEdge._to == purl._id
+							
+							FILTER (
+								sbomEdge.version_major != null AND 
+								cveEdge.introduced_major != null AND 
+								(cveEdge.fixed_major != null OR cveEdge.last_affected_major != null)
+							) ? (
+								(sbomEdge.version_major > cveEdge.introduced_major OR
+								(sbomEdge.version_major == cveEdge.introduced_major AND 
+								sbomEdge.version_minor > cveEdge.introduced_minor) OR
+								(sbomEdge.version_major == cveEdge.introduced_major AND 
+								sbomEdge.version_minor == cveEdge.introduced_minor AND 
+								sbomEdge.version_patch >= cveEdge.introduced_patch))
+								AND
+								(cveEdge.fixed_major != null ? (
+									sbomEdge.version_major < cveEdge.fixed_major OR
+									(sbomEdge.version_major == cveEdge.fixed_major AND 
+									sbomEdge.version_minor < cveEdge.fixed_minor) OR
+									(sbomEdge.version_major == cveEdge.fixed_major AND 
+									sbomEdge.version_minor == cveEdge.fixed_minor AND 
+									sbomEdge.version_patch < cveEdge.fixed_patch)
+								) : (
+									sbomEdge.version_major < cveEdge.last_affected_major OR
+									(sbomEdge.version_major == cveEdge.last_affected_major AND 
+									sbomEdge.version_minor < cveEdge.last_affected_minor) OR
+									(sbomEdge.version_major == cveEdge.last_affected_major AND 
+									sbomEdge.version_minor == cveEdge.last_affected_minor AND 
+									sbomEdge.version_patch <= cveEdge.last_affected_patch)
+								))
+							) : true
+							
+							LET cve = DOCUMENT(cveEdge._from)
+							FILTER cve != null
+							FILTER @severityScore == 0.0 OR cve.database_specific.cvss_base_score >= @severityScore
+							
+							LET matchedAffected = (
+								FOR affected IN cve.affected != null ? cve.affected : []
+									LET cveBasePurl = affected.package.purl != null ? 
+										affected.package.purl : 
+										CONCAT("pkg:", LOWER(affected.package.ecosystem), "/", affected.package.name)
+									FILTER cveBasePurl == purl.purl
+									RETURN affected
+							)
+							FILTER LENGTH(matchedAffected) > 0
+							
+							RETURN { cve_id: cve.id }
+				)
+				
+				LET prevUniqueCves = (
+					FOR match IN prevCveMatches
+						COLLECT cveId = match.cve_id
+						RETURN 1
+				)
+				
+				RETURN LENGTH(prevUniqueCves)
+			)[0] : null
+			
+			LET vulnerabilityCountDelta = prevVulnCount != null ? (vulnerabilityCount - prevVulnCount) : null
 
 			RETURN {
 				release_name: latestRelease.name,
@@ -817,8 +972,10 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 				project_type: latestRelease.projecttype,
 				openssf_scorecard_score: latestRelease.openssf_scorecard_score,
 				synced_endpoint_count: syncCount,
-				dependency_count: sbomData != null ? sbomData.component_count : 0,
+				dependency_count: LENGTH(dependencyCount),
 				max_severity: maxSeverity,
+				vulnerability_count: vulnerabilityCount,
+				vulnerability_count_delta: vulnerabilityCountDelta,
 				cve_matches: cveMatches
 			}
 			`
@@ -834,20 +991,22 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 	defer cursor.Close()
 
 	type AggregatedRelease struct {
-		ReleaseName           string   `json:"release_name"`
-		LatestVersion         string   `json:"latest_version"`
-		VersionMajor          *int     `json:"version_major"`
-		VersionMinor          *int     `json:"version_minor"`
-		VersionPatch          *int     `json:"version_patch"`
-		VersionPrerelease     string   `json:"version_prerelease"`
-		VersionCount          int      `json:"version_count"`
-		ContentSha            string   `json:"content_sha"`
-		ProjectType           string   `json:"project_type"`
-		OpenSSFScorecardScore *float64 `json:"openssf_scorecard_score"`
-		SyncedEndpointCount   int      `json:"synced_endpoint_count"`
-		DependencyCount       int      `json:"dependency_count"`
-		MaxSeverity           *float64 `json:"max_severity"`
-		CveMatches            []struct {
+		ReleaseName              string   `json:"release_name"`
+		LatestVersion            string   `json:"latest_version"`
+		VersionMajor             *int     `json:"version_major"`
+		VersionMinor             *int     `json:"version_minor"`
+		VersionPatch             *int     `json:"version_patch"`
+		VersionPrerelease        string   `json:"version_prerelease"`
+		VersionCount             int      `json:"version_count"`
+		ContentSha               string   `json:"content_sha"`
+		ProjectType              string   `json:"project_type"`
+		OpenSSFScorecardScore    *float64 `json:"openssf_scorecard_score"`
+		SyncedEndpointCount      int      `json:"synced_endpoint_count"`
+		DependencyCount          int      `json:"dependency_count"`
+		MaxSeverity              *float64 `json:"max_severity"`
+		VulnerabilityCount       int      `json:"vulnerability_count"`
+		VulnerabilityCountDelta  *int     `json:"vulnerability_count_delta"`
+		CveMatches               []struct {
 			CveID             *string           `json:"cve_id"`
 			CveSummary        *string           `json:"cve_summary"`
 			CveDetails        *string           `json:"cve_details"`
@@ -893,25 +1052,27 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 				seen[cveKey] = true
 
 				result := map[string]interface{}{
-					"cve_id":                  cveID,
-					"summary":                 getStringValue(cveMatch.CveSummary),
-					"details":                 getStringValue(cveMatch.CveDetails),
-					"severity_score":          getFloatValue(cveMatch.CveSeverityScore),
-					"severity_rating":         getStringValue(cveMatch.CveSeverityRating),
-					"published":               getStringValue(cveMatch.CvePublished),
-					"modified":                getStringValue(cveMatch.CveModified),
-					"aliases":                 cveMatch.CveAliases,
-					"package":                 cveMatch.Package,
-					"affected_version":        cveMatch.Version,
-					"full_purl":               cveMatch.FullPurl,
-					"release_name":            aggRelease.ReleaseName,
-					"release_version":         aggRelease.LatestVersion,
-					"version_count":           aggRelease.VersionCount,
-					"content_sha":             aggRelease.ContentSha,
-					"project_type":            aggRelease.ProjectType,
-					"openssf_scorecard_score": aggRelease.OpenSSFScorecardScore,
-					"dependency_count":        aggRelease.DependencyCount,
-					"synced_endpoint_count":   aggRelease.SyncedEndpointCount,
+					"cve_id":                     cveID,
+					"summary":                    getStringValue(cveMatch.CveSummary),
+					"details":                    getStringValue(cveMatch.CveDetails),
+					"severity_score":             getFloatValue(cveMatch.CveSeverityScore),
+					"severity_rating":            getStringValue(cveMatch.CveSeverityRating),
+					"published":                  getStringValue(cveMatch.CvePublished),
+					"modified":                   getStringValue(cveMatch.CveModified),
+					"aliases":                    cveMatch.CveAliases,
+					"package":                    cveMatch.Package,
+					"affected_version":           cveMatch.Version,
+					"full_purl":                  cveMatch.FullPurl,
+					"release_name":               aggRelease.ReleaseName,
+					"release_version":            aggRelease.LatestVersion,
+					"version_count":              aggRelease.VersionCount,
+					"content_sha":                aggRelease.ContentSha,
+					"project_type":               aggRelease.ProjectType,
+					"openssf_scorecard_score":    aggRelease.OpenSSFScorecardScore,
+					"dependency_count":           aggRelease.DependencyCount,
+					"synced_endpoint_count":      aggRelease.SyncedEndpointCount,
+					"vulnerability_count":        aggRelease.VulnerabilityCount,
+					"vulnerability_count_delta":  aggRelease.VulnerabilityCountDelta,
 				}
 
 				if len(cveMatch.AllAffected) > 0 {
@@ -928,26 +1089,28 @@ func resolveAffectedReleases(severity string) ([]interface{}, error) {
 				seen[releaseOnlyKey] = true
 
 				results = append(results, map[string]interface{}{
-					"cve_id":                  nil,
-					"summary":                 nil,
-					"details":                 nil,
-					"severity_score":          nil,
-					"severity_rating":         nil,
-					"published":               nil,
-					"modified":                nil,
-					"aliases":                 []string{},
-					"package":                 nil,
-					"affected_version":        nil,
-					"full_purl":               nil,
-					"fixed_in":                []string{},
-					"release_name":            aggRelease.ReleaseName,
-					"release_version":         aggRelease.LatestVersion,
-					"version_count":           aggRelease.VersionCount,
-					"content_sha":             aggRelease.ContentSha,
-					"project_type":            aggRelease.ProjectType,
-					"openssf_scorecard_score": aggRelease.OpenSSFScorecardScore,
-					"dependency_count":        aggRelease.DependencyCount,
-					"synced_endpoint_count":   aggRelease.SyncedEndpointCount,
+					"cve_id":                     nil,
+					"summary":                    nil,
+					"details":                    nil,
+					"severity_score":             nil,
+					"severity_rating":            nil,
+					"published":                  nil,
+					"modified":                   nil,
+					"aliases":                    []string{},
+					"package":                    nil,
+					"affected_version":           nil,
+					"full_purl":                  nil,
+					"fixed_in":                   []string{},
+					"release_name":               aggRelease.ReleaseName,
+					"release_version":            aggRelease.LatestVersion,
+					"version_count":              aggRelease.VersionCount,
+					"content_sha":                aggRelease.ContentSha,
+					"project_type":               aggRelease.ProjectType,
+					"openssf_scorecard_score":    aggRelease.OpenSSFScorecardScore,
+					"dependency_count":           aggRelease.DependencyCount,
+					"synced_endpoint_count":      aggRelease.SyncedEndpointCount,
+					"vulnerability_count":        aggRelease.VulnerabilityCount,
+					"vulnerability_count_delta":  aggRelease.VulnerabilityCountDelta,
 				})
 			}
 		}
